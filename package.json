@@ -13,6 +13,10 @@
     "./clients/*": {
       "types": "./dist/clients/*.d.ts",
       "default": "./dist/clients/*.js"
+    },
+    "./blueprints": {
+      "types": "./dist/blueprints/index.d.ts",
+      "default": "./dist/blueprints/index.js"
     }
   },
   "files": [
