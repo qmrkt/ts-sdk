@@ -24,7 +24,7 @@ import {
   minimumBootstrapDeposit,
   type CreateMarketParams,
 } from '../market-factory'
-import { bootstrap, buy, sell, getMarketState, storeResolutionLogic, optInToAsa, registerOutcomeAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit } from '../question-market'
+import { bootstrap, buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit } from '../question-market'
 import { readConfig } from '../protocol-config'
 import type { ClientConfig } from '../base'
 import { getLocalnetAccountByAddress } from './localnet-accounts'

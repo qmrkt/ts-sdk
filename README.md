@@ -1,11 +1,11 @@
-# @question/sdk
+# @questionmarket/sdk
 
 TypeScript SDK for [question.market](https://question.market) prediction market contracts on Algorand.
 
 ## Install
 
 ```bash
-npm install @question/sdk
+npm install @questionmarket/sdk
 ```
 
 ## What's in the box
@@ -37,7 +37,7 @@ npm install @question/sdk
 ### Get prices for a market
 
 ```typescript
-import { calculatePrices, SCALE } from '@question/sdk'
+import { calculatePrices, SCALE } from '@questionmarket/sdk'
 
 // quantities and b come from on-chain state (all fixed-point at SCALE = 10^6)
 const quantities = [5_000_000n, 3_000_000n, 2_000_000n]
@@ -52,7 +52,7 @@ console.log(prices.map(p => Number(p) / Number(SCALE)))
 ### Quote a buy trade
 
 ```typescript
-import { quoteBuyForBudgetFromState } from '@question/sdk'
+import { quoteBuyForBudgetFromState } from '@questionmarket/sdk'
 
 const quote = quoteBuyForBudgetFromState(
   {
@@ -76,8 +76,8 @@ console.log({
 ### Compile a resolution blueprint
 
 ```typescript
-import { compileResolutionBlueprint } from '@question/sdk/blueprints'
-import type { ResolutionBlueprint } from '@question/sdk/blueprints'
+import { compileResolutionBlueprint } from '@questionmarket/sdk/blueprints'
+import type { ResolutionBlueprint } from '@questionmarket/sdk/blueprints'
 
 const blueprint: ResolutionBlueprint = {
   id: 'entropy-reversal',
@@ -123,7 +123,7 @@ console.log(`Blueprint size: ${compiled.bytes.length} bytes`)
 
 ```typescript
 import algosdk from 'algosdk'
-import { buy, getMarketState } from '@question/sdk/clients/question-market'
+import { buy, getMarketState } from '@questionmarket/sdk/clients/question-market'
 
 const algodClient = new algosdk.Algodv2('token', 'http://localhost', 4001)
 const account = algosdk.mnemonicToSecretKey('your mnemonic here')
@@ -159,7 +159,7 @@ This matches the Algorand contract's uint64 fixed-point arithmetic exactly.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 
 `algosdk` is shipped as a package dependency.
 

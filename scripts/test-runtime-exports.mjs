@@ -1,22 +1,22 @@
 const runtimeChecks = [
   {
-    specifier: '@question/sdk',
+    specifier: '@questionmarket/sdk',
     requiredExports: ['sdkVersion', 'calculatePrices', 'quoteBuyForBudgetFromState'],
   },
   {
-    specifier: '@question/sdk/blueprints',
+    specifier: '@questionmarket/sdk/blueprints',
     requiredExports: ['compileResolutionBlueprint', 'validateResolutionBlueprint', 'getResolutionBlueprintPreset'],
   },
   {
-    specifier: '@question/sdk/clients/question-market',
+    specifier: '@questionmarket/sdk/clients/question-market',
     requiredExports: ['buy', 'getMarketState'],
   },
   {
-    specifier: '@question/sdk/clients/market-factory',
+    specifier: '@questionmarket/sdk/clients/market-factory',
     requiredExports: ['createMarketAtomic', 'minimumBootstrapDeposit'],
   },
   {
-    specifier: '@question/sdk/clients/protocol-config',
+    specifier: '@questionmarket/sdk/clients/protocol-config',
     requiredExports: ['readConfig'],
   },
 ]

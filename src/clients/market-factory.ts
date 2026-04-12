@@ -1,5 +1,5 @@
 import algosdk from 'algosdk'
-import { type ClientConfig, loadMethods, boxName, boxNameAddr, bootstrapBoxRefs } from './base.js'
+import { type ClientConfig, loadMethods, boxName, boxNameAddr, bootstrapBoxRefs, ceilDiv, withMinFlatFee, withExplicitFlatFee, textEncoder, MIN_TXN_FEE, SECONDS_PER_DAY } from './base.js'
 import {
   DEFAULT_LP_ENTRY_MAX_PRICE_FP as DEFAULT_LP_ENTRY_MAX_PRICE_FP_NUMBER,
 } from './market-schema.js'
@@ -23,31 +23,11 @@ const ACCOUNT_BASE_MBR = 100_000n
 const ASA_HOLDING_MBR = 100_000n
 const BOX_FLAT_MBR = 2_500n
 const BOX_BYTE_MBR = 400n
-const MIN_TXN_FEE = 1_000n
-const SECONDS_PER_DAY = 86_400n
-const textEncoder = new TextEncoder()
-
 export class AtomicCreateUnsupportedError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AtomicCreateUnsupportedError'
   }
-}
-
-function withMinFlatFee(
-  suggestedParams: algosdk.SuggestedParams,
-  multiplier: bigint = 1n,
-): algosdk.SuggestedParams {
-  const normalizedFee = MIN_TXN_FEE * (multiplier > 0n ? multiplier : 1n)
-  return {
-    ...suggestedParams,
-    flatFee: true,
-    fee: normalizedFee,
-  }
-}
-
-function ceilDiv(numerator: bigint, denominator: bigint): bigint {
-  return (numerator + denominator - 1n) / denominator
 }
 
 async function advanceRound(
@@ -105,8 +85,6 @@ async function readConfirmedCreatedAppId(
 }
 
 export interface CreateMarketParams {
-  // Deprecated: creator is derived from the transaction sender in MarketFactory.
-  creator?: string
   currencyAsa: number
   questionHash: Uint8Array
   numOutcomes: number
@@ -118,8 +96,6 @@ export interface CreateMarketParams {
   deadline: number
   challengeWindowSecs: number
   marketAdmin?: string
-  // Deprecated: proposal/challenge bonds are protocol-configured in M3.
-  proposalBond?: bigint
   gracePeriodSecs?: number
   cancellable: boolean
   bootstrapDeposit: bigint
@@ -258,38 +234,47 @@ function extractCreatedAppId(txnGroup: algosdk.modelsv2.SimulateTransactionGroup
   throw new Error('Could not determine created app ID from simulation')
 }
 
-function buildFactoryCreateComposer(
+function buildFactoryMbrFundingTxn(
   config: ClientConfig,
-  params: CreateMarketParams,
   suggestedParams: algosdk.SuggestedParams,
-): algosdk.AtomicTransactionComposer {
-  const method = methods.get('create_market')!
-  const factoryAddr = algosdk.getApplicationAddress(Number(config.appId)).toString()
-  const atc = new algosdk.AtomicTransactionComposer()
-
-  const mbrPayment = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+): algosdk.TransactionWithSigner {
+  const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
     sender: config.sender,
-    receiver: factoryAddr,
+    receiver: algosdk.getApplicationAddress(Number(config.appId)).toString(),
     amount: FACTORY_CREATE_MBR,
     suggestedParams,
   })
-  const fundingTxn = { txn: mbrPayment, signer: config.signer }
+  return { txn, signer: config.signer }
+}
 
-  const callSp = { ...suggestedParams }
-  callSp.flatFee = true
-  callSp.fee = BigInt(2000)
-
+function addFactoryCreateMethodCall(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  params: CreateMarketParams,
+  suggestedParams: algosdk.SuggestedParams,
+  fundingTxn: algosdk.TransactionWithSigner,
+): void {
+  const method = methods.get('create_market')!
   atc.addMethodCall({
     appID: Number(config.appId),
     method,
     methodArgs: [...buildCreateMarketMethodArgs(params, config.sender), fundingTxn],
     sender: config.sender,
-    suggestedParams: callSp,
+    suggestedParams: withExplicitFlatFee(suggestedParams, 2_000n),
     signer: config.signer,
     note: params.note,
     appForeignApps: [params.protocolConfigAppId],
   })
+}
 
+function buildFactoryCreateComposer(
+  config: ClientConfig,
+  params: CreateMarketParams,
+  suggestedParams: algosdk.SuggestedParams,
+): algosdk.AtomicTransactionComposer {
+  const atc = new algosdk.AtomicTransactionComposer()
+  const fundingTxn = buildFactoryMbrFundingTxn(config, suggestedParams)
+  addFactoryCreateMethodCall(atc, config, params, suggestedParams, fundingTxn)
   return atc
 }
 
@@ -318,18 +303,22 @@ type BuiltAtomicGroup = {
   totalTxns: number
 }
 
-function buildAtomicCreateComposer(
+type AtomicCreateBuildPlan = {
+  marketAppId: number
+  marketAddr: string
+  marketMbrFunding: bigint
+  bootstrapFundingAmount: bigint
+  noopCount: number
+  noopBoxChunks: algosdk.BoxReference[][]
+  totalTxns: number
+}
+
+function prepareAtomicCreateBuildPlan(
   config: ClientConfig,
   params: CreateMarketAtomicParams,
-  suggestedParams: algosdk.SuggestedParams,
   predictedAppId: bigint,
   noopCount: number,
-): BuiltAtomicGroup {
-  const createMethod = methods.get('create_market')!
-  const initializeMethod = marketMethods.get('initialize')!
-  const storeMainBlueprintMethod = marketMethods.get('store_main_blueprint')!
-  const storeDisputeBlueprintMethod = marketMethods.get('store_dispute_blueprint')!
-  const bootstrapMethod = marketMethods.get('bootstrap')!
+): AtomicCreateBuildPlan {
   const marketAppId = Number(predictedAppId)
   const marketAddr = algosdk.getApplicationAddress(marketAppId).toString()
   const marketMbrFunding = params.marketMbrFunding ?? estimateAtomicMarketMbrFunding(params)
@@ -346,106 +335,159 @@ function buildAtomicCreateComposer(
     )
   }
 
-  const atc = new algosdk.AtomicTransactionComposer()
+  return {
+    marketAppId,
+    marketAddr,
+    marketMbrFunding,
+    bootstrapFundingAmount,
+    noopCount,
+    noopBoxChunks,
+    totalTxns,
+  }
+}
 
-  const factoryMbrPayment = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-    sender: config.sender,
-    receiver: algosdk.getApplicationAddress(Number(config.appId)).toString(),
-    amount: FACTORY_CREATE_MBR,
-    suggestedParams: withMinFlatFee(suggestedParams),
-  })
-  const factoryFundingTxn = { txn: factoryMbrPayment, signer: config.signer }
-
-  const createSp = { ...suggestedParams }
-  createSp.flatFee = true
-  createSp.fee = BigInt(2000)
-  atc.addMethodCall({
-    appID: Number(config.appId),
-    method: createMethod,
-    methodArgs: [...buildCreateMarketMethodArgs(params, config.sender), factoryFundingTxn],
-    sender: config.sender,
-    suggestedParams: createSp,
-    signer: config.signer,
-    note: params.note,
-    appForeignApps: [params.protocolConfigAppId],
-  })
-
+function addMarketMbrFundingTxn(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
   const marketMbrPayment = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
     sender: config.sender,
-    receiver: marketAddr,
-    amount: marketMbrFunding,
+    receiver: plan.marketAddr,
+    amount: plan.marketMbrFunding,
     suggestedParams: withMinFlatFee(suggestedParams),
   })
   atc.addTransaction({ txn: marketMbrPayment, signer: config.signer })
+}
 
+function addMarketOptInTxn(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
   const optInTxn = algosdk.makeApplicationOptInTxnFromObject({
     sender: config.sender,
-    appIndex: marketAppId,
+    appIndex: plan.marketAppId,
     suggestedParams: withMinFlatFee(suggestedParams),
   })
   atc.addTransaction({ txn: optInTxn, signer: config.signer })
+}
 
-  for (let i = 0; i < noopCount; i++) {
+function addAtomicNoopTxns(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
+  for (let i = 0; i < plan.noopCount; i++) {
     const txn = algosdk.makeApplicationNoOpTxnFromObject({
       sender: config.sender,
-      appIndex: marketAppId,
+      appIndex: plan.marketAppId,
       suggestedParams: withMinFlatFee(suggestedParams),
-      boxes: noopBoxChunks[i]?.length ? noopBoxChunks[i] : undefined,
+      boxes: plan.noopBoxChunks[i]?.length ? plan.noopBoxChunks[i] : undefined,
       note: textEncoder.encode(`atomic-noop:${i}`),
     })
     atc.addTransaction({ txn, signer: config.signer })
   }
+}
 
-  const initializeSp = { ...suggestedParams }
-  initializeSp.flatFee = true
-  initializeSp.fee = BigInt((params.numOutcomes + 2) * 1000)
+function addInitializeMethodCall(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  params: CreateMarketAtomicParams,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
+  const initializeMethod = marketMethods.get('initialize')!
   atc.addMethodCall({
-    appID: marketAppId,
+    appID: plan.marketAppId,
     method: initializeMethod,
     methodArgs: [],
     sender: config.sender,
-    suggestedParams: initializeSp,
+    suggestedParams: withExplicitFlatFee(suggestedParams, BigInt((params.numOutcomes + 2) * 1000)),
     signer: config.signer,
     appForeignAssets: [params.currencyAsa],
   })
+}
+
+function addBlueprintStorageMethodCalls(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  params: CreateMarketAtomicParams,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
+  const storeMainBlueprintMethod = marketMethods.get('store_main_blueprint')!
+  const storeDisputeBlueprintMethod = marketMethods.get('store_dispute_blueprint')!
 
   atc.addMethodCall({
-    appID: marketAppId,
+    appID: plan.marketAppId,
     method: storeMainBlueprintMethod,
     methodArgs: [params.mainBlueprint],
     sender: config.sender,
     suggestedParams: withMinFlatFee(suggestedParams),
     signer: config.signer,
-    boxes: [{ appIndex: marketAppId, name: textEncoder.encode('mb') }],
+    boxes: [{ appIndex: plan.marketAppId, name: textEncoder.encode('mb') }],
   })
 
   atc.addMethodCall({
-    appID: marketAppId,
+    appID: plan.marketAppId,
     method: storeDisputeBlueprintMethod,
     methodArgs: [params.disputeBlueprint],
     sender: config.sender,
     suggestedParams: withMinFlatFee(suggestedParams),
     signer: config.signer,
-    boxes: [{ appIndex: marketAppId, name: textEncoder.encode('db') }],
+    boxes: [{ appIndex: plan.marketAppId, name: textEncoder.encode('db') }],
   })
+}
 
+function addBootstrapMethodCall(
+  atc: algosdk.AtomicTransactionComposer,
+  config: ClientConfig,
+  params: CreateMarketAtomicParams,
+  suggestedParams: algosdk.SuggestedParams,
+  plan: AtomicCreateBuildPlan,
+): void {
+  const bootstrapMethod = marketMethods.get('bootstrap')!
   const depositTxn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
     sender: config.sender,
-    receiver: marketAddr,
+    receiver: plan.marketAddr,
     assetIndex: params.currencyAsa,
-    amount: bootstrapFundingAmount,
+    amount: plan.bootstrapFundingAmount,
     suggestedParams: withMinFlatFee(suggestedParams),
   })
   atc.addMethodCall({
-    appID: marketAppId,
+    appID: plan.marketAppId,
     method: bootstrapMethod,
     methodArgs: [params.bootstrapDeposit, { txn: depositTxn, signer: config.signer }],
     sender: config.sender,
     suggestedParams: withMinFlatFee(suggestedParams, 2n),
     signer: config.signer,
   })
+}
 
-  return { atc, predictedAppId, totalTxns }
+function buildAtomicCreateComposer(
+  config: ClientConfig,
+  params: CreateMarketAtomicParams,
+  suggestedParams: algosdk.SuggestedParams,
+  predictedAppId: bigint,
+  noopCount: number,
+): BuiltAtomicGroup {
+  const plan = prepareAtomicCreateBuildPlan(config, params, predictedAppId, noopCount)
+  const atc = new algosdk.AtomicTransactionComposer()
+  const factoryFundingTxn = buildFactoryMbrFundingTxn(config, withMinFlatFee(suggestedParams))
+
+  addFactoryCreateMethodCall(atc, config, params, suggestedParams, factoryFundingTxn)
+  addMarketMbrFundingTxn(atc, config, suggestedParams, plan)
+  addMarketOptInTxn(atc, config, suggestedParams, plan)
+  addAtomicNoopTxns(atc, config, suggestedParams, plan)
+  addInitializeMethodCall(atc, config, params, suggestedParams, plan)
+  addBlueprintStorageMethodCalls(atc, config, params, suggestedParams, plan)
+  addBootstrapMethodCall(atc, config, params, suggestedParams, plan)
+
+  return { atc, predictedAppId, totalTxns: plan.totalTxns }
 }
 
 type AtomicCreateSimulation = {
@@ -539,7 +581,7 @@ export function buildCreateMarketMethodArgs(
     disputeBlueprintHash,
     BigInt(params.deadline),
     BigInt(params.challengeWindowSecs),
-    params.marketAdmin ?? params.creator ?? sender,
+    params.marketAdmin ?? sender,
     BigInt(params.gracePeriodSecs ?? 0),
     params.cancellable,
     params.lpEntryMaxPriceFp ?? DEFAULT_LP_ENTRY_MAX_PRICE_FP,
@@ -557,11 +599,6 @@ async function resolveInitialB(
   )
   if (challengeWindowSupportError) {
     throw new AtomicCreateUnsupportedError(challengeWindowSupportError)
-  }
-  if ((params.proposalBond ?? 0n) > 0n) {
-    throw new AtomicCreateUnsupportedError(
-      'proposalBond is no longer a per-market create parameter; resolution bonds are protocol-configured',
-    )
   }
   let initialB = params.initialB
   if (initialB <= 0n) {

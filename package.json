@@ -1,5 +1,5 @@
 {
-  "name": "@question/sdk",
+  "name": "@questionmarket/sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for question.market prediction market contracts on Algorand",
   "type": "module",
@@ -24,11 +24,12 @@
   ],
   "scripts": {
     "build": "tsc",
+    "postbuild": "node ./scripts/copy-client-specs.mjs",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:runtime": "node ./scripts/test-runtime-exports.mjs",
-    "test:drift": "vitest run src/clients/__tests__/frontend-drift.test.ts",
-    "test:localnet": "vitest run src/clients/__tests__/e2e-localnet.test.ts src/clients/__tests__/atomicity-localnet.test.ts src/clients/__tests__/stress-test.test.ts src/clients/__tests__/avm-budget-benchmark.test.ts src/clients/__tests__/resolution-engine-smoke.test.ts",
+    "test:drift": "vitest run --config vitest.integration.config.ts src/clients/__tests__/frontend-drift.test.ts",
+    "test:localnet": "vitest run --config vitest.integration.config.ts src/clients/__tests__/e2e-localnet.test.ts src/clients/__tests__/atomicity-localnet.test.ts src/clients/__tests__/stress-test.test.ts src/clients/__tests__/avm-budget-benchmark.test.ts src/clients/__tests__/resolution-engine-smoke.test.ts",
     "test:integration": "npm run test:drift && npm run test:localnet",
     "test": "npm run build && npm run test:unit && npm run test:runtime",
     "prepublishOnly": "npm test"
@@ -49,6 +50,6 @@
   "author": "Andrei Savin <andrei@andreisavin.com>",
   "homepage": "https://question.market",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

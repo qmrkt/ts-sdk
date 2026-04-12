@@ -9,6 +9,38 @@ import {
   MARKET_BOX_USER_SHARES_PREFIX,
 } from './market-schema.js'
 
+export const MIN_TXN_FEE = 1_000n
+export const SECONDS_PER_DAY = 86_400n
+
+export function ceilDiv(numerator: bigint, denominator: bigint): bigint {
+  return (numerator + denominator - 1n) / denominator
+}
+
+export function withMinFlatFee(
+  suggestedParams: algosdk.SuggestedParams,
+  multiplier: bigint = 1n,
+): algosdk.SuggestedParams {
+  const normalizedFee = MIN_TXN_FEE * (multiplier > 0n ? multiplier : 1n)
+  return {
+    ...suggestedParams,
+    flatFee: true,
+    fee: normalizedFee,
+  }
+}
+
+export function withExplicitFlatFee(
+  suggestedParams: algosdk.SuggestedParams,
+  fee: bigint,
+): algosdk.SuggestedParams {
+  return {
+    ...suggestedParams,
+    flatFee: true,
+    fee,
+  }
+}
+
+export const textEncoder = new TextEncoder()
+
 export interface ClientConfig {
   algodClient: algosdk.Algodv2
   appId: number | bigint

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SUPPORTED_LLM_MODEL_IDS } from './llm-models'
 import { validateResolutionBlueprint } from './validate'
 import type { ResolutionBlueprint, ResolutionBlueprintNodeDef } from './types'
 
@@ -176,7 +177,7 @@ describe('human_judge designated_address validation', () => {
 describe('llm_judge provider validation', () => {
   it('passes for a supported explicit provider/model pair', () => {
     const bp = minimalBlueprint(
-      [llmJudgeNode({ config: { provider: 'openai', model: 'gpt-4o' } }), submitNode()],
+      [llmJudgeNode({ config: { provider: 'openai', model: SUPPORTED_LLM_MODEL_IDS.openai.gpt54 } }), submitNode()],
       [{ from: 'judge', to: 'submit' }],
     )
 
@@ -186,7 +187,7 @@ describe('llm_judge provider validation', () => {
 
   it('passes when provider is omitted but model implies a supported provider', () => {
     const bp = minimalBlueprint(
-      [llmJudgeNode({ config: { provider: undefined, model: 'gemini-2.5-pro' } }), submitNode()],
+      [llmJudgeNode({ config: { provider: undefined, model: SUPPORTED_LLM_MODEL_IDS.google.gemini31 } }), submitNode()],
       [{ from: 'judge', to: 'submit' }],
     )
 
@@ -196,7 +197,7 @@ describe('llm_judge provider validation', () => {
 
   it('fails when provider and model families do not match', () => {
     const bp = minimalBlueprint(
-      [llmJudgeNode({ config: { provider: 'anthropic', model: 'gpt-4o' } }), submitNode()],
+      [llmJudgeNode({ config: { provider: 'anthropic', model: SUPPORTED_LLM_MODEL_IDS.openai.gpt54 } }), submitNode()],
       [{ from: 'judge', to: 'submit' }],
     )
 

@@ -13,16 +13,39 @@ export const LLM_PROVIDER_LABELS: Record<LLMProvider, string> = {
   google: 'Google',
 }
 
+export const SUPPORTED_LLM_MODEL_IDS = {
+  anthropic: {
+    opus46: 'claude-opus-4-6',
+    sonnet46: 'claude-sonnet-4-6',
+    haiku45: 'claude-haiku-4-5-20251001',
+  },
+  openai: {
+    gpt54: 'gpt-5.4',
+    gpt54Mini: 'gpt-5.4-mini',
+  },
+  google: {
+    gemini31: 'gemini-3.1-pro-preview',
+    gemini31FlashPreview: 'gemini-3.1-flash-lite-preview',
+  },
+} as const
+
 export const LLM_MODEL_OPTIONS: readonly LLMModelOption[] = [
-  { provider: 'anthropic', value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { provider: 'anthropic', value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', default: true },
-  { provider: 'anthropic', value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { provider: 'openai', value: 'gpt-4o', label: 'GPT-4o', default: true },
-  { provider: 'openai', value: 'gpt-4o-mini', label: 'GPT-4o mini' },
-  { provider: 'openai', value: 'o3-mini', label: 'o3-mini' },
-  { provider: 'google', value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', default: true },
-  { provider: 'google', value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { provider: 'google', value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite' },
+  { provider: 'anthropic', value: SUPPORTED_LLM_MODEL_IDS.anthropic.opus46, label: 'Claude Opus 4.6' },
+  {
+    provider: 'anthropic',
+    value: SUPPORTED_LLM_MODEL_IDS.anthropic.sonnet46,
+    label: 'Claude Sonnet 4.6',
+    default: true,
+  },
+  { provider: 'anthropic', value: SUPPORTED_LLM_MODEL_IDS.anthropic.haiku45, label: 'Claude Haiku 4.5' },
+  { provider: 'openai', value: SUPPORTED_LLM_MODEL_IDS.openai.gpt54, label: 'GPT-5.4', default: true },
+  { provider: 'openai', value: SUPPORTED_LLM_MODEL_IDS.openai.gpt54Mini, label: 'GPT-5.4 mini' },
+  { provider: 'google', value: SUPPORTED_LLM_MODEL_IDS.google.gemini31, label: 'Gemini 3.1', default: true },
+  {
+    provider: 'google',
+    value: SUPPORTED_LLM_MODEL_IDS.google.gemini31FlashPreview,
+    label: 'Gemini 3.1 Flash-Lite Preview',
+  },
 ]
 
 const LLM_PROVIDERS: readonly LLMProvider[] = ['anthropic', 'openai', 'google']

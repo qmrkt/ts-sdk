@@ -8,6 +8,10 @@ Initial public release.
 - Trade quoting: `quoteBuyForBudgetFromState`, `quoteBuyForSharesFromState`, `calculateSellReturn`
 - AVM-safe trade validation: `calculateAvmBuyCost`, `isAvmBuySafe`
 - Liquidity scaling for LP deposit/withdraw: `calculateLiquidityScaling`, `calculateLiquidityValue`
-- Contract clients: market factory, question market, market schema, protocol config
+- Contract clients: market factory, question market (trading, liquidity, resolution), market schema, protocol config
 - Resolution blueprint toolkit: compiler, validator, presets, types, cycle detection, capabilities
-- 45 unit tests across LMSR math, blueprint validation, cycle detection, and capabilities
+- Shared utilities in base: `ceilDiv`, `withMinFlatFee`, `withExplicitFlatFee`, `textEncoder`
+- Parallel network calls in buy/sell/claim/refund for lower trade latency
+- Question-market split into sub-modules: trading, liquidity, resolution, internal
+- Removed deprecated `proposalBond`, `creator`, and `registerOutcomeAsa`
+- 90 unit tests
