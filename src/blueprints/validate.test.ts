@@ -236,3 +236,55 @@ describe('api_fetch outcome mapping validation', () => {
     expect(result.issues.find((i) => i.code === 'API_OUTCOME_MAPPING_UNKNOWN_OUTCOME')).toBeDefined()
   })
 })
+
+describe('submit_result outcome source validation', () => {
+  it('fails when outcome_key does not reference a context field', () => {
+    const bp = minimalBlueprint([
+      humanJudgeNode(),
+      {
+        id: 'submit',
+        type: 'submit_result',
+        config: { outcome_key: 'judge' },
+      } as ResolutionBlueprintNodeDef,
+    ], [{ from: 'judge', to: 'submit' }])
+
+    const result = validateResolutionBlueprint(bp)
+    expect(result.issues.find((i) => i.code === 'SUBMIT_OUTCOME_KEY_INVALID')).toBeDefined()
+  })
+
+  it('fails when outcome_key references an unknown node', () => {
+    const bp = minimalBlueprint([
+      humanJudgeNode(),
+      {
+        id: 'submit',
+        type: 'submit_result',
+        config: { outcome_key: 'search.outcome' },
+      } as ResolutionBlueprintNodeDef,
+    ], [{ from: 'judge', to: 'submit' }])
+
+    const result = validateResolutionBlueprint(bp)
+    expect(result.issues.find((i) => i.code === 'SUBMIT_OUTCOME_KEY_UNKNOWN_SOURCE')).toBeDefined()
+  })
+})
+
+describe('edge condition validation', () => {
+  it('fails when a condition has malformed syntax', () => {
+    const bp = minimalBlueprint(
+      [humanJudgeNode(), submitNode()],
+      [{ from: 'judge', to: 'submit', condition: "(judge.status == 'responded'" }],
+    )
+
+    const result = validateResolutionBlueprint(bp)
+    expect(result.issues.find((i) => i.code === 'EDGE_CONDITION_INVALID')).toBeDefined()
+  })
+
+  it('fails when a condition references an unknown context root', () => {
+    const bp = minimalBlueprint(
+      [humanJudgeNode(), submitNode()],
+      [{ from: 'judge', to: 'submit', condition: "search.status == 'success'" }],
+    )
+
+    const result = validateResolutionBlueprint(bp)
+    expect(result.issues.find((i) => i.code === 'EDGE_CONDITION_UNKNOWN_SOURCE')).toBeDefined()
+  })
+})

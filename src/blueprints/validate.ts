@@ -73,8 +73,11 @@ export function validateResolutionBlueprint(
         severity: 'error',
       })
     }
+  }
 
-    validateNodeConfig(node, issues, options)
+  for (const node of blueprint.nodes) {
+    if (!(node.type in RESOLUTION_NODE_CAPABILITIES)) continue
+    validateNodeConfig(node, issues, options, nodeIds)
   }
 
   const edgeIds = new Set<string>()
@@ -115,6 +118,10 @@ export function validateResolutionBlueprint(
         target: edgeId,
         severity: 'error',
       })
+    }
+
+    for (const issue of validateEdgeCondition(edge, nodeIds)) {
+      issues.push(issue)
     }
   }
 
@@ -258,6 +265,7 @@ function validateNodeConfig(
   node: ResolutionBlueprintNodeDef,
   issues: ResolutionBlueprintValidationIssue[],
   options: ResolutionBlueprintValidationOptions,
+  nodeIds: Set<string>,
 ) {
   switch (node.type) {
     case 'api_fetch':
@@ -470,11 +478,119 @@ function validateNodeConfig(
           target: node.id,
           severity: 'error',
         })
+      } else {
+        const outcomeKey = node.config.outcome_key.trim()
+        const [sourceNodeId, outputKey] = outcomeKey.split('.', 2)
+        if (!sourceNodeId || !outputKey) {
+          issues.push({
+            code: 'SUBMIT_OUTCOME_KEY_INVALID',
+            message: `Node "${node.label ?? node.id}" must reference an upstream context key like "judge.outcome".`,
+            target: node.id,
+            severity: 'error',
+          })
+        } else if (!nodeIds.has(sourceNodeId)) {
+          issues.push({
+            code: 'SUBMIT_OUTCOME_KEY_UNKNOWN_SOURCE',
+            message: `Node "${node.label ?? node.id}" references unknown source node "${sourceNodeId}".`,
+            target: node.id,
+            severity: 'error',
+          })
+        }
       }
       break
     case 'cancel_market':
       break
   }
+}
+
+function validateEdgeCondition(
+  edge: ResolutionBlueprintEdgeDef,
+  nodeIds: Set<string>,
+): ResolutionBlueprintValidationIssue[] {
+  const issues: ResolutionBlueprintValidationIssue[] = []
+  const condition = edge.condition?.trim()
+  if (!condition) return issues
+
+  const edgeId = `${edge.from}->${edge.to}`
+  const syntaxError = findConditionSyntaxError(condition)
+  if (syntaxError) {
+    issues.push({
+      code: 'EDGE_CONDITION_INVALID',
+      message: `Edge "${edgeId}" has malformed condition syntax: ${syntaxError}.`,
+      target: edgeId,
+      severity: 'error',
+    })
+    return issues
+  }
+
+  const allowedRoots = new Set(['market', 'input'])
+  for (const root of collectConditionRoots(condition)) {
+    if (!allowedRoots.has(root) && !nodeIds.has(root)) {
+      issues.push({
+        code: 'EDGE_CONDITION_UNKNOWN_SOURCE',
+        message: `Edge "${edgeId}" references unknown context root "${root}".`,
+        target: edgeId,
+        severity: 'error',
+      })
+    }
+  }
+
+  return issues
+}
+
+function findConditionSyntaxError(condition: string): string | null {
+  let parenDepth = 0
+  let inSingleQuote = false
+  let inDoubleQuote = false
+
+  for (let index = 0; index < condition.length; index += 1) {
+    const char = condition[index]
+    const previous = index > 0 ? condition[index - 1] : ''
+    const escaped = previous === '\\'
+
+    if (!inDoubleQuote && char === "'" && !escaped) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (!inSingleQuote && char === '"' && !escaped) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (inSingleQuote || inDoubleQuote) continue
+
+    if (char === '(') {
+      parenDepth += 1
+    } else if (char === ')') {
+      parenDepth -= 1
+      if (parenDepth < 0) {
+        return 'unbalanced parentheses'
+      }
+    }
+  }
+
+  if (inSingleQuote || inDoubleQuote) {
+    return 'unterminated string literal'
+  }
+
+  if (parenDepth !== 0) {
+    return 'unbalanced parentheses'
+  }
+
+  return null
+}
+
+function collectConditionRoots(condition: string): Set<string> {
+  const roots = new Set<string>()
+  const rootPattern = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\./g
+
+  for (const match of condition.matchAll(rootPattern)) {
+    const root = match[1]?.trim()
+    if (root) roots.add(root)
+  }
+
+  return roots
 }
 
 function getRootNodes(
