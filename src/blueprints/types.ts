@@ -58,6 +58,7 @@ export interface LLMJudgeConfig {
   prompt: string
   require_citations?: boolean
   timeout_seconds?: number
+  web_search?: boolean
 }
 
 export interface WaitConfig {

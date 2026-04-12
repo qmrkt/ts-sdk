@@ -106,6 +106,7 @@ export interface NormalizedIndexerMarket {
   blueprintSummary: string
   questionHash: string
   volume: string
+  imageCid: string
 }
 
 export interface NormalizedIndexerLpStake {
@@ -270,5 +271,6 @@ export function normalizeIndexerMarket(raw: any): NormalizedIndexerMarket {
     blueprintSummary: String(raw?.blueprintSummary ?? ''),
     questionHash: String(raw?.questionHash ?? ''),
     volume: String(raw?.volume ?? '0'),
+    imageCid: String(raw?.imageCid ?? ''),
   }
 }

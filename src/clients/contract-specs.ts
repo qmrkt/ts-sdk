@@ -1,7 +1,7 @@
-import { createRequire } from 'node:module'
+import marketFactoryJson from './specs/MarketFactory.arc56.json' with { type: 'json' }
+import protocolConfigJson from './specs/ProtocolConfig.arc56.json' with { type: 'json' }
+import questionMarketJson from './specs/QuestionMarket.arc56.json' with { type: 'json' }
 
-const require = createRequire(import.meta.url)
-
-export const marketFactorySpec = require('./specs/MarketFactory.arc56.json')
-export const protocolConfigSpec = require('./specs/ProtocolConfig.arc56.json')
-export const questionMarketSpec = require('./specs/QuestionMarket.arc56.json')
+export const marketFactorySpec = marketFactoryJson
+export const protocolConfigSpec = protocolConfigJson
+export const questionMarketSpec = questionMarketJson
