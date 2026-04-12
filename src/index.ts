@@ -1,8 +1,12 @@
-export const sdkVersion = '0.0.0';
+export const sdkVersion = '0.1.0';
 
+/** Fixed-point scale factor (10^6). All prices and quantities use this as the fractional base. */
 export const SCALE = 1_000_000n;
+/** Number of Taylor series terms for exp approximation (matches AVM contract). */
 export const EXP_TAYLOR_TERMS = 20n;
+/** Number of Taylor series terms for ln approximation (matches AVM contract). */
 export const LN_TAYLOR_TERMS = 32n;
+/** ln(2) in fixed-point at SCALE precision. */
 export const LN2_FP = 693_147n;
 export const MAX_UINT64 = (1n << 64n) - 1n;
 export const MAX_UINT128 = (1n << 128n) - 1n;
@@ -12,6 +16,7 @@ export const AVM_SINGLE_TXN_TRADE_TOO_LARGE = 'trade_too_large_for_single_txn';
 export const BUY_BUDGET_TOO_SMALL_MESSAGE = 'Budget is too small to buy any shares at the current price.';
 export const BUY_SINGLE_TXN_TOO_LARGE_MESSAGE =
   'This trade is too large to execute safely in one transaction. Try a smaller amount or split it into smaller buys.';
+/** Minimum share unit. Shares are denominated in multiples of SCALE (1 share = 10^6 units). */
 export const SHARE_GRANULARITY = SCALE;
 
 export class LMSRMathError extends Error {
@@ -385,6 +390,14 @@ function avmSumShiftedExpFp(quantities: bigint[], b: bigint, sharedMaxFp: bigint
   return total;
 }
 
+/**
+ * Calculate the cost of buying shares using AVM-matching fixed-point arithmetic.
+ * @param quantities - current LMSR inventory state per outcome (fixed-point at SCALE)
+ * @param b - liquidity depth parameter (fixed-point at SCALE)
+ * @param outcomeIndex - which outcome to buy (0-based)
+ * @param shares - number of shares to buy (fixed-point at SCALE)
+ * @returns cost in micro-USDC (ceiling-rounded to match AVM contract behavior)
+ */
 export function calculateAvmBuyCost(quantities: bigint[], b: bigint, outcomeIndex: number, shares: bigint): bigint {
   validateState(quantities, b);
   requireCondition(outcomeIndex >= 0 && outcomeIndex < quantities.length, 'outcome index out of range');
@@ -409,6 +422,7 @@ export function calculateAvmBuyCost(quantities: bigint[], b: bigint, outcomeInde
   return checkUint64(avmCeilDiv(deltaNumerator, SCALE), 'avm lmsrCostDelta');
 }
 
+/** Returns true if the buy can execute within uint64 arithmetic bounds on AVM. */
 export function isAvmBuySafe(quantities: bigint[], b: bigint, outcomeIndex: number, shares: bigint): boolean {
   try {
     calculateAvmBuyCost(quantities, b, outcomeIndex, shares);
@@ -443,6 +457,7 @@ function expTaylor20Reduced(xFp: bigint): bigint {
   return checkUint64(total, 'expFp result');
 }
 
+/** Compute exp(x) in fixed-point. Handles both positive and negative inputs via range reduction and squaring. */
 export function expFp(xFp: bigint): bigint {
   requireCondition(typeof xFp === 'bigint', 'xFp must be bigint');
   if (xFp === 0n) {
@@ -464,6 +479,7 @@ export function expFp(xFp: bigint): bigint {
   return checkUint64(result, 'expFp result');
 }
 
+/** Compute ln(x) in fixed-point. Input must be >= SCALE (i.e., x >= 1.0). Uses argument reduction and Mercator series. */
 export function lnFp(xFp: bigint): bigint {
   requireCondition(typeof xFp === 'bigint', 'xFp must be bigint');
   requireCondition(xFp > 0n, 'ln input must be positive');
@@ -513,11 +529,13 @@ export function lnFp(xFp: bigint): bigint {
   return result;
 }
 
+/** Compute q_i / b for each outcome, yielding the exponent inputs for LMSR price calculation. */
 export function exponentInputsFp(quantities: bigint[], b: bigint): bigint[] {
   validateState(quantities, b);
   return quantities.map((quantity) => mulDivFloor(quantity, SCALE, b));
 }
 
+/** Numerically stable log-sum-exp: subtract max exponent before summing, then add it back. */
 export function logSumExpFp(exponentsFp: bigint[]): LogSumExpResult {
   requireCondition(exponentsFp.length >= 1, 'need at least one exponent');
   requireCondition(exponentsFp.every((value) => typeof value === 'bigint' && value >= 0n), 'exponents must be non-negative bigints');
@@ -543,6 +561,7 @@ export function logSumExpFp(exponentsFp: bigint[]): LogSumExpResult {
   };
 }
 
+/** Compute log-sum-exp over the LMSR state vector q/b. This is the core of LMSR price and cost calculations. */
 export function lmsrLogSumExpFp(quantities: bigint[], b: bigint): LogSumExpResult {
   return logSumExpFp(exponentInputsFp(quantities, b));
 }
@@ -560,10 +579,15 @@ function lmsrCostNumerator(quantities: bigint[], b: bigint): bigint {
   return checkedMul(b, lse.logSumExpFp, 'cost numerator');
 }
 
+/** Calculate the LMSR cost function C(q) = b * ln(sum(exp(q_i / b))). */
 export function calculateCost(quantities: bigint[], b: bigint): bigint {
   return checkUint64(ceilDiv(lmsrCostNumerator(quantities, b), SCALE), 'lmsrCost');
 }
 
+/**
+ * Calculate buy cost using high-precision (Decimal-equivalent) arithmetic.
+ * Use {@link calculateAvmBuyCost} for AVM-matching fixed-point behavior.
+ */
 export function calculateBuyCost(quantities: bigint[], b: bigint, outcomeIndex: number, shares: bigint): bigint {
   validateState(quantities, b);
   requireCondition(outcomeIndex >= 0 && outcomeIndex < quantities.length, 'outcome index out of range');
@@ -617,6 +641,10 @@ function tryTotalBuyCost(state: BuyQuoteState, outcomeIndex: number, shares: big
   }
 }
 
+/**
+ * Binary-search for the maximum whole shares purchasable within a micro-USDC budget.
+ * Returns shares in fixed-point units (1 share = SCALE = 10^6).
+ */
 export function quoteSharesForBudgetFromState(
   state: BuyQuoteState,
   outcomeIndex: number,
@@ -672,6 +700,12 @@ function zeroQuote(beforePrices: bigint[], errorCode: string, error: string): Bu
   };
 }
 
+/**
+ * Quote a buy trade for a specific number of shares. Returns total cost, before/after prices, and error status.
+ * @param state - current market state (quantities, b, fee rates)
+ * @param outcomeIndex - which outcome to buy
+ * @param shares - exact shares to buy (fixed-point at SCALE)
+ */
 export function quoteBuyForSharesFromState(
   state: BuyQuoteState,
   outcomeIndex: number,
@@ -708,6 +742,12 @@ export function quoteBuyForSharesFromState(
   };
 }
 
+/**
+ * Quote a buy trade for a maximum micro-USDC budget. Finds the largest share amount that fits.
+ * @param state - current market state (quantities, b, fee rates)
+ * @param outcomeIndex - which outcome to buy
+ * @param maxCostMicroUsdc - maximum spend in micro-USDC (1 USDC = 10^6)
+ */
 export function quoteBuyForBudgetFromState(
   state: BuyQuoteState,
   outcomeIndex: number,
@@ -742,6 +782,10 @@ export function quoteBuyForBudgetFromState(
   return quoteBuyForSharesFromState(state, outcomeIndex, shares);
 }
 
+/**
+ * Calculate the USDC returned when selling shares back to the market maker.
+ * @returns micro-USDC returned (floor-rounded)
+ */
 export function calculateSellReturn(quantities: bigint[], b: bigint, outcomeIndex: number, shares: bigint): bigint {
   validateState(quantities, b);
   requireCondition(outcomeIndex >= 0 && outcomeIndex < quantities.length, 'outcome index out of range');
@@ -758,6 +802,10 @@ export function calculateSellReturn(quantities: bigint[], b: bigint, outcomeInde
   return checkUint64(result, 'lmsrSellReturn');
 }
 
+/**
+ * Calculate the current price vector from LMSR state. Prices sum to SCALE (1.0).
+ * @returns array of prices in fixed-point at SCALE, one per outcome
+ */
 export function calculatePrices(quantities: bigint[], b: bigint): bigint[] {
   validateState(quantities, b);
   const lse = lmsrLogSumExpFp(quantities, b);
@@ -779,6 +827,11 @@ export function calculatePrices(quantities: bigint[], b: bigint): bigint[] {
   return prices;
 }
 
+/**
+ * Scale LMSR state for LP deposit or withdrawal. Adjusts quantities and b proportionally.
+ * Deposit: new depth = old depth * (pool + deposit) / pool.
+ * Withdraw: new depth = old depth * (total - withdrawn) / total.
+ */
 export function calculateLiquidityScaling(input: LiquidityScalingInput): LiquidityScalingResult {
   validateState(input.quantities, input.b);
   checkUint64(input.poolBalance, 'poolBalance');
@@ -820,6 +873,14 @@ export function calculateLiquidityScaling(input: LiquidityScalingInput): Liquidi
   };
 }
 
+/**
+ * Calculate an LP's current value: pro-rata pool claim plus accrued fees from the cumulative fee index.
+ * @param input.poolBalance - total non-fee pool balance in micro-USDC
+ * @param input.lpSharesTotal - total LP shares outstanding
+ * @param input.userLpShares - this LP's share count
+ * @param input.cumulativeFeePerShare - current cumulative fee index
+ * @param input.userFeeSnapshot - LP's fee index snapshot at entry time
+ */
 export function calculateLiquidityValue(input: LiquidityValueInput): LiquidityValue {
   checkUint64(input.poolBalance, 'poolBalance');
   checkUint64(input.lpSharesTotal, 'lpSharesTotal');
