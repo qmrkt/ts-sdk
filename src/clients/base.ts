@@ -7,7 +7,7 @@ import {
   MARKET_BOX_USER_COST_BASIS_PREFIX,
   MARKET_BOX_USER_FEES_PREFIX,
   MARKET_BOX_USER_SHARES_PREFIX,
-} from './market-schema'
+} from './market-schema.js'
 
 export interface ClientConfig {
   algodClient: algosdk.Algodv2

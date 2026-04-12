@@ -1,4 +1,4 @@
-import type { ResolutionBlueprintEdgeDef, ResolutionBlueprintNodeDef } from './types'
+import type { ResolutionBlueprintEdgeDef, ResolutionBlueprintNodeDef } from './types.js'
 
 type Color = 'white' | 'gray' | 'black'
 

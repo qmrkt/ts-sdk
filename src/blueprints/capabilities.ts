@@ -12,7 +12,7 @@ import type {
   ResolutionTrustClass,
   SubmitResultConfig,
   WaitConfig,
-} from './types'
+} from './types.js'
 
 export interface ResolutionNodeCapability {
   type: ResolutionBlueprintNodeType

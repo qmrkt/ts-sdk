@@ -1,11 +1,10 @@
 import algosdk from 'algosdk'
-import { type ClientConfig, loadMethods, boxName, boxNameAddr, bootstrapBoxRefs } from './base'
+import { type ClientConfig, loadMethods, boxName, boxNameAddr, bootstrapBoxRefs } from './base.js'
 import {
   DEFAULT_LP_ENTRY_MAX_PRICE_FP as DEFAULT_LP_ENTRY_MAX_PRICE_FP_NUMBER,
-} from './market-schema'
-import { readConfig, type ProtocolConfig } from './protocol-config'
-import spec from './specs/MarketFactory.arc56.json'
-import marketSpec from './specs/QuestionMarket.arc56.json'
+} from './market-schema.js'
+import { readConfig, type ProtocolConfig } from './protocol-config.js'
+import { marketFactorySpec as spec, questionMarketSpec as marketSpec } from './contract-specs.js'
 
 const methods = loadMethods(spec)
 const marketMethods = loadMethods(marketSpec)

@@ -1,4 +1,4 @@
-import type { ResolutionBlueprint, ResolutionBlueprintPreset, ResolutionBlueprintPresetId } from './types'
+import type { ResolutionBlueprint, ResolutionBlueprintPreset, ResolutionBlueprintPresetId } from './types.js'
 
 function createBaseBlueprint(
   id: string,

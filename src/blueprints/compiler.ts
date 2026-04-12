@@ -1,11 +1,11 @@
-import { cloneSerializable } from './clone'
-import { validateResolutionBlueprint } from './validate'
+import { cloneSerializable } from './clone.js'
+import { validateResolutionBlueprint } from './validate.js'
 import type {
   CompiledResolutionBlueprint,
   MarketTemplateContext,
   ResolutionBlueprint,
   ResolutionBlueprintNodeDef,
-} from './types'
+} from './types.js'
 
 const TOKEN_REPLACERS: Record<string, (market: MarketTemplateContext) => string> = {
   '{{market.question}}': (market) => market.question,

@@ -1,6 +1,9 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import referenceVectors from '../../contracts/tests/fixtures/lmsr_reference_vectors.json';
+import referenceVectors from './fixtures/lmsr_reference_vectors.json';
 import {
   BUY_BUDGET_TOO_SMALL_MESSAGE,
   BUY_SINGLE_TXN_TOO_LARGE_MESSAGE,
@@ -19,6 +22,33 @@ import {
   quoteBuyForSharesFromState,
   sdkVersion,
 } from './index';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')) as { version: string }
+).version;
+
+function findContractsRoot(): string | null {
+  const candidates = [
+    process.env.QUESTION_CONTRACTS_ROOT,
+    path.resolve(__dirname, '../contracts'),
+    path.resolve(__dirname, '../../question/contracts'),
+    path.resolve(__dirname, '../../contracts'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, 'smart_contracts', 'lmsr_math.py'))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+const CONTRACTS_ROOT = findContractsRoot();
+const pythonCheck = spawnSync('python3', ['--version'], { stdio: 'ignore' });
+const HAS_CONTRACT_MATH = CONTRACTS_ROOT !== null && !pythonCheck.error && pythonCheck.status === 0;
+const describeWithContractMath = HAS_CONTRACT_MATH ? describe : describe.skip;
 
 type ReferenceCase = {
   id: string;
@@ -50,13 +80,17 @@ function sum(values: bigint[]): bigint {
 }
 
 function runPythonContractMath(payload: unknown) {
+  if (!CONTRACTS_ROOT) {
+    throw new Error('Contract math fixtures are unavailable');
+  }
+
   const script = [
     'import json, sys',
     'from pathlib import Path',
-    "root = Path.cwd().parent",
-    'sys.path.insert(0, str(root / "contracts"))',
+    'contracts_root = Path(sys.argv[1]).resolve()',
+    'sys.path.insert(0, str(contracts_root))',
     'from smart_contracts.lmsr_math import lmsr_cost_delta, lmsr_sell_return, lmsr_prices, lmsr_cost',
-    'payload = json.loads(sys.argv[1])',
+    'payload = json.loads(sys.argv[2])',
     'q = payload["q"]',
     'b = payload["b"]',
     'outcome = payload["outcome"]',
@@ -69,8 +103,8 @@ function runPythonContractMath(payload: unknown) {
     '}))',
   ].join('\n');
 
-  const stdout = execFileSync('python3', ['-c', script, JSON.stringify(payload)], {
-    cwd: new URL('..', import.meta.url),
+  const stdout = execFileSync('python3', ['-c', script, CONTRACTS_ROOT, JSON.stringify(payload)], {
+    cwd: __dirname,
     encoding: 'utf8',
   });
   return JSON.parse(stdout) as {
@@ -82,18 +116,22 @@ function runPythonContractMath(payload: unknown) {
 }
 
 function runPythonBuyCost(payload: { q: number[]; b: number; outcome: number; shares: number }) {
+  if (!CONTRACTS_ROOT) {
+    throw new Error('Contract math fixtures are unavailable');
+  }
+
   const script = [
     'import json, sys',
     'from pathlib import Path',
-    "root = Path.cwd().parent",
-    'sys.path.insert(0, str(root / "contracts"))',
+    'contracts_root = Path(sys.argv[1]).resolve()',
+    'sys.path.insert(0, str(contracts_root))',
     'from smart_contracts.lmsr_math import lmsr_cost_delta',
-    'payload = json.loads(sys.argv[1])',
+    'payload = json.loads(sys.argv[2])',
     'print(lmsr_cost_delta(payload["q"], payload["b"], payload["outcome"], payload["shares"]))',
   ].join('\n');
 
-  const stdout = execFileSync('python3', ['-c', script, JSON.stringify(payload)], {
-    cwd: new URL('..', import.meta.url),
+  const stdout = execFileSync('python3', ['-c', script, CONTRACTS_ROOT, JSON.stringify(payload)], {
+    cwd: __dirname,
     encoding: 'utf8',
   });
   return BigInt(stdout.trim());
@@ -101,7 +139,7 @@ function runPythonBuyCost(payload: { q: number[]; b: number; outcome: number; sh
 
 describe('sdk scaffold', () => {
   it('exports a version constant', () => {
-    expect(sdkVersion).toBe('0.0.0');
+    expect(sdkVersion).toBe(PACKAGE_VERSION);
   });
 });
 
@@ -118,7 +156,7 @@ describe('calculateBuyCost reference vectors', () => {
   }
 });
 
-describe('calculateSellReturn contract expectations', () => {
+describeWithContractMath('calculateSellReturn contract expectations', () => {
   const contractCases = [
     { id: 'balanced_partial_sell', q: [500000, 500000], b: 1000000, outcome: 0, shares: 125000 },
     { id: 'skewed_mid_sell', q: [100000, 200000, 350000, 500000, 900000], b: 750000, outcome: 3, shares: 125000 },
@@ -242,7 +280,7 @@ describe('C1 known-good reference vector coverage', () => {
   });
 });
 
-describe('cross-validation with contract math implementation', () => {
+describeWithContractMath('cross-validation with contract math implementation', () => {
   const randomCases = [
     { q: [100_000, 0], b: 1_000_000, outcome: 0, shares: 1 },
     { q: [500_000, 700_000], b: 1_100_000, outcome: 1, shares: 125_000 },
@@ -264,7 +302,7 @@ describe('cross-validation with contract math implementation', () => {
   }
 });
 
-describe('budget-edge contract parity regressions', () => {
+describeWithContractMath('budget-edge contract parity regressions', () => {
   it('matches contract math for the 50M-b $10 budget regression case', () => {
     const regressionCase = {
       q: [0, 0],
@@ -297,6 +335,9 @@ describe('budget-edge contract parity regressions', () => {
     expect(calculateAvmBuyCost([0n, 0n], 50_000_000n, 0, safeShares)).toBe(expected);
   });
 
+});
+
+describe('budget-edge standalone regressions', () => {
   it('detects exponent overflow before a buy reaches the contract', () => {
     const maxExponentQuantity = MAX_UINT64 / SCALE;
 

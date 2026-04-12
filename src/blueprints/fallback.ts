@@ -1,5 +1,5 @@
-import type { ResolutionBlueprint, ResolutionBlueprintPresetId } from './types'
-import { buildResolutionBlueprintPreset } from './presets'
+import type { ResolutionBlueprint, ResolutionBlueprintPresetId } from './types.js'
+import { buildResolutionBlueprintPreset } from './presets.js'
 
 export interface InferredResolutionBlueprintFallback {
   blueprint: ResolutionBlueprint

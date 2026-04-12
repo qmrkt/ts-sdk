@@ -1,4 +1,4 @@
-import type { LLMProvider } from './types'
+import type { LLMProvider } from './types.js'
 
 export interface LLMModelOption {
   provider: LLMProvider

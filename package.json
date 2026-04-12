@@ -25,8 +25,13 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:runtime": "node ./scripts/test-runtime-exports.mjs",
+    "test:drift": "vitest run src/clients/__tests__/frontend-drift.test.ts",
+    "test:localnet": "vitest run src/clients/__tests__/e2e-localnet.test.ts src/clients/__tests__/atomicity-localnet.test.ts src/clients/__tests__/stress-test.test.ts src/clients/__tests__/avm-budget-benchmark.test.ts src/clients/__tests__/resolution-engine-smoke.test.ts",
+    "test:integration": "npm run test:drift && npm run test:localnet",
+    "test": "npm run build && npm run test:unit && npm run test:runtime",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "algosdk": "^3.5.2"
@@ -42,5 +47,8 @@
   },
   "license": "MIT",
   "author": "Andrei Savin <andrei@andreisavin.com>",
-  "homepage": "https://question.market"
+  "homepage": "https://question.market",
+  "engines": {
+    "node": ">=18"
+  }
 }

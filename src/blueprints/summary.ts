@@ -1,18 +1,18 @@
-import { getNodeCapability } from "./capabilities";
-
-function truncateAddress(addr: string, prefix = 6, suffix = 4): string {
-  if (addr.length <= prefix + suffix + 3) return addr
-  return `${addr.slice(0, prefix)}...${addr.slice(-suffix)}`
-}
-import { describeLLMSelection } from "./llm-models";
+import { getNodeCapability } from './capabilities.js'
+import { compileResolutionBlueprint } from './compiler.js'
+import { describeLLMSelection } from './llm-models.js'
 import type {
   CompiledResolutionBlueprint,
   MarketTemplateContext,
   ResolutionBlueprint,
   ResolutionBlueprintNodeDef,
   ResolutionTrustClass,
-} from "./types";
-import { compileResolutionBlueprint } from "./compiler";
+} from './types.js'
+
+function truncateAddress(addr: string, prefix = 6, suffix = 4): string {
+  if (addr.length <= prefix + suffix + 3) return addr
+  return `${addr.slice(0, prefix)}...${addr.slice(-suffix)}`
+}
 
 export function getNodeDisplayLabel(
   node: ResolutionBlueprintNodeDef | null | undefined

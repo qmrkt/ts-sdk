@@ -20,10 +20,10 @@ npm install @question/sdk
 
 **LMSR math** -- fixed-point arithmetic matching the AVM contract implementation:
 
-- `quoteBuyForBudget` / `quoteBuyForShares` -- trade quoting from indexed state
+- `quoteBuyForBudgetFromState` / `quoteBuyForSharesFromState` -- trade quoting from indexed state
 - `calculatePrices` -- current price vector from LMSR state
 - `calculateSellReturn` -- USDC returned when selling shares
-- `exp`, `ln`, `logSumExp` -- Taylor-series approximations at `SCALE = 10^6`
+- `expFp`, `lnFp`, `logSumExpFp` -- Taylor-series approximations at `SCALE = 10^6`
 
 **Blueprint toolkit** -- resolution blueprint compiler, validator, and presets:
 
@@ -123,21 +123,27 @@ console.log(`Blueprint size: ${compiled.bytes.length} bytes`)
 
 ```typescript
 import algosdk from 'algosdk'
-import { buy } from '@question/sdk/clients/question-market'
+import { buy, getMarketState } from '@question/sdk/clients/question-market'
 
-const algod = new algosdk.Algodv2('token', 'http://localhost', 4001)
+const algodClient = new algosdk.Algodv2('token', 'http://localhost', 4001)
 const account = algosdk.mnemonicToSecretKey('your mnemonic here')
+const signer = algosdk.makeBasicAccountTransactionSigner(account)
+const appId = 1234
+const marketState = await getMarketState(algodClient, appId)
 
-await buy({
-  algod,
-  appId: 1234n,             // market app ID
-  sender: account.addr,
-  signer: account.signer,
-  outcomeIndex: 0,
-  shares: 1_000_000n,       // 1 share
-  maxCost: 500_000n,        // max 0.50 USDC
-  usdcAsaId: 31566704n,     // testnet USDC
-})
+await buy(
+  {
+    algodClient,
+    appId,
+    sender: account.addr,
+    signer,
+  },
+  0,             // outcome index
+  500_000n,      // max 0.50 USDC
+  marketState.numOutcomes,
+  31_566_704,    // USDC ASA ID
+  1_000_000n,    // 1 share
+)
 ```
 
 ## Fixed-point conventions
@@ -154,7 +160,8 @@ This matches the Algorand contract's uint64 fixed-point arithmetic exactly.
 ## Requirements
 
 - Node.js 18+
-- `algosdk` ^3.5.2
+
+`algosdk` is shipped as a package dependency.
 
 ## License
 

@@ -1,6 +1,6 @@
 import algosdk from 'algosdk'
-import { type ClientConfig, loadMethods, callMethod, readGlobalState } from './base'
-import spec from './specs/ProtocolConfig.arc56.json'
+import { type ClientConfig, loadMethods, callMethod, readGlobalState } from './base.js'
+import { protocolConfigSpec as spec } from './contract-specs.js'
 
 const methods = loadMethods(spec)
 

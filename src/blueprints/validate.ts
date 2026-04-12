@@ -4,16 +4,16 @@ import {
   AUTHORABLE_NODE_TYPES,
   RESOLUTION_NODE_CAPABILITIES,
   getNodeCapability,
-} from './capabilities'
-import { detectCycles } from './cycle-detection'
-import { inferLLMProviderFromModel, isLLMModelCompatible, isLLMProvider } from './llm-models'
+} from './capabilities.js'
+import { detectCycles } from './cycle-detection.js'
+import { inferLLMProviderFromModel, isLLMModelCompatible, isLLMProvider } from './llm-models.js'
 import type {
   ResolutionBlueprint,
   ResolutionBlueprintEdgeDef,
   ResolutionBlueprintNodeDef,
   ResolutionBlueprintValidationIssue,
   ResolutionBlueprintValidationResult,
-} from './types'
+} from './types.js'
 
 const TERMINAL_NODE_TYPES = new Set(['submit_result', 'cancel_market', 'defer_resolution'])
 

@@ -1,6 +1,6 @@
 import algosdk from 'algosdk'
-import { type ClientConfig, type MethodCallOptions, loadMethods, callMethod, readGlobalState, readBox, boxName, boxNameAddr, boxNameAddrIdx, marketBoxRefs, bootstrapBoxRefs, pricingBoxRefs } from './base'
-import { SCALE, calculatePrices, lnFp } from '../index'
+import { type ClientConfig, type MethodCallOptions, loadMethods, callMethod, readGlobalState, readBox, boxName, boxNameAddr, boxNameAddrIdx, marketBoxRefs, bootstrapBoxRefs, pricingBoxRefs } from './base.js'
+import { SCALE, calculatePrices, lnFp } from '../index.js'
 import {
   COMMENTS_MIN_CONTRACT_VERSION,
   CURRENT_MARKET_CONTRACT_VERSION,
@@ -13,9 +13,8 @@ import {
   MARKET_LOCAL_LP_WEIGHTED_ENTRY_SUM,
   MARKET_LOCAL_RESIDUAL_CLAIMED,
   MARKET_LOCAL_WITHDRAWABLE_FEE_SURPLUS,
-} from './market-schema'
-import spec from './specs/QuestionMarket.arc56.json'
-import protocolConfigSpec from './specs/ProtocolConfig.arc56.json'
+} from './market-schema.js'
+import { protocolConfigSpec, questionMarketSpec as spec } from './contract-specs.js'
 
 const methods = loadMethods(spec)
 const protocolConfigMethods = loadMethods(protocolConfigSpec)
