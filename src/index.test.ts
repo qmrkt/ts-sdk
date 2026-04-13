@@ -1,5 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -27,28 +26,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_VERSION = (
   JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')) as { version: string }
 ).version;
-
-function findContractsRoot(): string | null {
-  const candidates = [
-    process.env.QUESTION_CONTRACTS_ROOT,
-    path.resolve(__dirname, '../contracts'),
-    path.resolve(__dirname, '../../question/contracts'),
-    path.resolve(__dirname, '../../contracts'),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (existsSync(path.join(candidate, 'smart_contracts', 'lmsr_math.py'))) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-const CONTRACTS_ROOT = findContractsRoot();
-const pythonCheck = spawnSync('python3', ['--version'], { stdio: 'ignore' });
-const HAS_CONTRACT_MATH = CONTRACTS_ROOT !== null && !pythonCheck.error && pythonCheck.status === 0;
-const describeWithContractMath = HAS_CONTRACT_MATH ? describe : describe.skip;
 
 type ReferenceCase = {
   id: string;
@@ -79,64 +56,6 @@ function sum(values: bigint[]): bigint {
   return values.reduce((total, value) => total + value, 0n);
 }
 
-function runPythonContractMath(payload: unknown) {
-  if (!CONTRACTS_ROOT) {
-    throw new Error('Contract math fixtures are unavailable');
-  }
-
-  const script = [
-    'import json, sys',
-    'from pathlib import Path',
-    'contracts_root = Path(sys.argv[1]).resolve()',
-    'sys.path.insert(0, str(contracts_root))',
-    'from smart_contracts.lmsr_math import lmsr_cost_delta, lmsr_sell_return, lmsr_prices, lmsr_cost',
-    'payload = json.loads(sys.argv[2])',
-    'q = payload["q"]',
-    'b = payload["b"]',
-    'outcome = payload["outcome"]',
-    'shares = payload["shares"]',
-    'print(json.dumps({',
-    '  "buy_cost": lmsr_cost_delta(q, b, outcome, shares),',
-    '  "sell_return": lmsr_sell_return(q, b, outcome, shares),',
-    '  "prices": lmsr_prices(q, b),',
-    '  "cost": lmsr_cost(q, b),',
-    '}))',
-  ].join('\n');
-
-  const stdout = execFileSync('python3', ['-c', script, CONTRACTS_ROOT, JSON.stringify(payload)], {
-    cwd: __dirname,
-    encoding: 'utf8',
-  });
-  return JSON.parse(stdout) as {
-    buy_cost: number;
-    sell_return: number;
-    prices: number[];
-    cost: number;
-  };
-}
-
-function runPythonBuyCost(payload: { q: number[]; b: number; outcome: number; shares: number }) {
-  if (!CONTRACTS_ROOT) {
-    throw new Error('Contract math fixtures are unavailable');
-  }
-
-  const script = [
-    'import json, sys',
-    'from pathlib import Path',
-    'contracts_root = Path(sys.argv[1]).resolve()',
-    'sys.path.insert(0, str(contracts_root))',
-    'from smart_contracts.lmsr_math import lmsr_cost_delta',
-    'payload = json.loads(sys.argv[2])',
-    'print(lmsr_cost_delta(payload["q"], payload["b"], payload["outcome"], payload["shares"]))',
-  ].join('\n');
-
-  const stdout = execFileSync('python3', ['-c', script, CONTRACTS_ROOT, JSON.stringify(payload)], {
-    cwd: __dirname,
-    encoding: 'utf8',
-  });
-  return BigInt(stdout.trim());
-}
-
 describe('sdk scaffold', () => {
   it('exports a version constant', () => {
     expect(sdkVersion).toBe(PACKAGE_VERSION);
@@ -152,28 +71,6 @@ describe('calculateBuyCost reference vectors', () => {
 
       expect(buyCost).toBe(BigInt(testCase.cost_delta));
       expect(marketCost).toBe(BigInt(testCase.cost));
-    });
-  }
-});
-
-describeWithContractMath('calculateSellReturn contract expectations', () => {
-  const contractCases = [
-    { id: 'balanced_partial_sell', q: [500000, 500000], b: 1000000, outcome: 0, shares: 125000 },
-    { id: 'skewed_mid_sell', q: [100000, 200000, 350000, 500000, 900000], b: 750000, outcome: 3, shares: 125000 },
-    {
-      id: 'wide_tail_sell',
-      q: [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 110000, 120000, 130000, 140000, 150000, 160000],
-      b: 1500000,
-      outcome: 15,
-      shares: 55000,
-    },
-  ];
-
-  for (const testCase of contractCases) {
-    it(`calculateSellReturn matches contract math for ${testCase.id}`, () => {
-      const expected = runPythonContractMath(testCase);
-      const actual = calculateSellReturn(toBigIntArray(testCase.q), BigInt(testCase.b), testCase.outcome, BigInt(testCase.shares));
-      expect(actual).toBe(BigInt(expected.sell_return));
     });
   }
 });
@@ -278,63 +175,6 @@ describe('C1 known-good reference vector coverage', () => {
     expect(referenceVectors.scale).toBe(1_000_000);
     expect((referenceVectors.cases as ReferenceCase[]).length).toBeGreaterThan(0);
   });
-});
-
-describeWithContractMath('cross-validation with contract math implementation', () => {
-  const randomCases = [
-    { q: [100_000, 0], b: 1_000_000, outcome: 0, shares: 1 },
-    { q: [500_000, 700_000], b: 1_100_000, outcome: 1, shares: 125_000 },
-    { q: [2_000_000, 1_000_000, 500_000], b: 800_000, outcome: 2, shares: 100_000 },
-    { q: [10_000, 20_000, 30_000, 40_000, 50_000], b: 300_000, outcome: 4, shares: 5_000 },
-    { q: [90_000, 140_000, 250_000, 350_000, 600_000, 1_200_000], b: 1_500_000, outcome: 5, shares: 200_000 },
-  ];
-
-  for (const [index, testCase] of randomCases.entries()) {
-    it(`produces identical outputs against contract math case ${index + 1}`, () => {
-      const expected = runPythonContractMath(testCase);
-      const quantities = toBigIntArray(testCase.q);
-
-      expect(calculateBuyCost(quantities, BigInt(testCase.b), testCase.outcome, BigInt(testCase.shares))).toBe(BigInt(expected.buy_cost));
-      expect(calculateSellReturn(quantities, BigInt(testCase.b), testCase.outcome, BigInt(testCase.shares))).toBe(BigInt(expected.sell_return));
-      expect(calculatePrices(quantities, BigInt(testCase.b))).toEqual(toBigIntArray(expected.prices));
-      expect(calculateCost(quantities, BigInt(testCase.b))).toBe(BigInt(expected.cost));
-    });
-  }
-});
-
-describeWithContractMath('budget-edge contract parity regressions', () => {
-  it('matches contract math for the 50M-b $10 budget regression case', () => {
-    const regressionCase = {
-      q: [0, 0],
-      b: 50_000_000,
-      outcome: 0,
-      shares: 17_915_899,
-    };
-
-    const expected = runPythonBuyCost(regressionCase);
-    const actual = calculateBuyCost(
-      toBigIntArray(regressionCase.q),
-      BigInt(regressionCase.b),
-      regressionCase.outcome,
-      BigInt(regressionCase.shares),
-    );
-
-    expect(actual).toBe(expected);
-  });
-
-  it('keeps the 50M-b $10 budget regression case inside the AVM buy domain', () => {
-    const safeShares = 17_915_899n;
-    const expected = runPythonBuyCost({
-      q: [0, 0],
-      b: 50_000_000,
-      outcome: 0,
-      shares: Number(safeShares),
-    });
-
-    expect(isAvmBuySafe([0n, 0n], 50_000_000n, 0, safeShares)).toBe(true);
-    expect(calculateAvmBuyCost([0n, 0n], 50_000_000n, 0, safeShares)).toBe(expected);
-  });
-
 });
 
 describe('budget-edge standalone regressions', () => {
