@@ -7,17 +7,13 @@ import * as path from 'node:path'
 import * as net from 'node:net'
 import { fileURLToPath } from 'node:url'
 
-import { createMarketLegacy, type CreateMarketParams } from '../market-factory'
+import { createMarketAtomic, type CreateMarketAtomicParams } from '../market-factory'
 import {
   getMarketState,
-  optInToAsa,
-  storeDisputeBlueprint,
-  storeMainBlueprint,
   triggerResolution,
   challengeResolution,
 } from '../question-market'
-import { boxNameAddr, bootstrapBoxRefs, loadMethods, type ClientConfig } from '../base'
-import marketSpec from '../specs/QuestionMarket.arc56.json'
+import type { ClientConfig } from '../base'
 import { getLocalnetAccountAtIndex, getLocalnetAccountByAddress, type LocalnetAccount } from './localnet-accounts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -32,8 +28,6 @@ const ALGOD_PORT = 4001
 const GO_BIN = process.env.GO_BIN || 'go'
 const TEST_PATH = `/opt/homebrew/bin:${process.env.PATH || ''}`
 const INDEXER_WRITE_TOKEN = 'resolution-smoke-write-token'
-
-const marketMethods = loadMethods(marketSpec)
 
 type ServiceHandle = {
   proc: ChildProcessWithoutNullStreams
@@ -186,159 +180,6 @@ async function waitForHealthy(url: string): Promise<void> {
     (response) => response.ok,
     60_000,
     1_000,
-  )
-}
-
-function makeAssetTransfer(
-  sender: string,
-  receiver: string,
-  assetId: number,
-  amount: bigint,
-  suggestedParams: algosdk.SuggestedParams,
-): algosdk.Transaction {
-  return algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
-    sender,
-    receiver,
-    assetIndex: assetId,
-    amount,
-    suggestedParams,
-  })
-}
-
-function deduplicateBoxes(refs: algosdk.BoxReference[]): algosdk.BoxReference[] {
-  const seen = new Set<string>()
-  const result: algosdk.BoxReference[] = []
-  for (const ref of refs) {
-    const key = `${ref.appIndex}:${Buffer.from(ref.name).toString('hex')}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(ref)
-  }
-  return result
-}
-
-function noopsFor(numOutcomes: number): number {
-  if (numOutcomes <= 2) return 10
-  if (numOutcomes <= 3) return 14
-  return 14
-}
-
-async function callMarketWithBudget(
-  config: ClientConfig,
-  methodName: string,
-  args: (algosdk.ABIValue | algosdk.TransactionWithSigner)[],
-  numOutcomes: number,
-  opts?: {
-    boxOverride?: algosdk.BoxReference[]
-    foreignAssets?: number[]
-    appAccounts?: string[]
-    innerTxnCount?: number
-  },
-) {
-  const atc = new algosdk.AtomicTransactionComposer()
-  const suggestedParams = await config.algodClient.getTransactionParams().do()
-  const method = marketMethods.get(methodName)
-  if (!method) throw new Error(`Method ${methodName} not found`)
-
-  const allBoxes = deduplicateBoxes(opts?.boxOverride ?? [])
-  const maxRefsPerTxn = 8
-  const effectiveNoops = Math.max(noopsFor(numOutcomes), Math.ceil(allBoxes.length / maxRefsPerTxn))
-
-  for (let i = 0; i < effectiveNoops; i++) {
-    const start = i * maxRefsPerTxn
-    const chunk = allBoxes.slice(start, start + maxRefsPerTxn)
-    const txn = algosdk.makeApplicationNoOpTxnFromObject({
-      sender: config.sender,
-      appIndex: Number(config.appId),
-      suggestedParams,
-      note: new TextEncoder().encode(`smoke-${methodName}-${i}`),
-      boxes: chunk.length > 0 ? chunk : undefined,
-    })
-    atc.addTransaction({ txn, signer: config.signer })
-  }
-
-  const callParams = { ...suggestedParams }
-  if (opts?.innerTxnCount) {
-    callParams.flatFee = true
-    callParams.fee = BigInt((1 + opts.innerTxnCount) * 1000)
-  }
-
-  const methodBoxes = allBoxes.slice(0, Math.min(maxRefsPerTxn - (opts?.foreignAssets?.length ?? 0), allBoxes.length))
-  atc.addMethodCall({
-    appID: Number(config.appId),
-    method,
-    methodArgs: args,
-    sender: config.sender,
-    suggestedParams: callParams,
-    signer: config.signer,
-    boxes: methodBoxes.length > 0 ? methodBoxes : undefined,
-    appForeignAssets: opts?.foreignAssets,
-    appAccounts: opts?.appAccounts,
-  })
-
-  return atc.execute(config.algodClient, 4)
-}
-
-async function manualBootstrapWithBlueprints(
-  config: ClientConfig,
-  depositAmount: bigint,
-  currencyAsaId: number,
-  numOutcomes: number,
-  mainBlueprint: Uint8Array,
-  disputeBlueprint: Uint8Array,
-) {
-  const appAddr = algosdk.getApplicationAddress(Number(config.appId)).toString()
-
-  const optInParams = await config.algodClient.getTransactionParams().do()
-  const optInTxn = algosdk.makeApplicationOptInTxnFromObject({
-    sender: config.sender,
-    appIndex: Number(config.appId),
-    suggestedParams: optInParams,
-  })
-  const optInAtc = new algosdk.AtomicTransactionComposer()
-  optInAtc.addTransaction({ txn: optInTxn, signer: config.signer })
-  await optInAtc.execute(config.algodClient, 4)
-
-  const mbrParams = await config.algodClient.getTransactionParams().do()
-  const mbrTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-    sender: config.sender,
-    receiver: appAddr,
-    amount: 1_000_000 + numOutcomes * 200_000,
-    suggestedParams: mbrParams,
-  })
-  const mbrAtc = new algosdk.AtomicTransactionComposer()
-  mbrAtc.addTransaction({ txn: mbrTxn, signer: config.signer })
-  await mbrAtc.execute(config.algodClient, 4)
-
-  await optInToAsa(config, currencyAsaId)
-
-  await callMarketWithBudget(
-    config,
-    'initialize',
-    [],
-    numOutcomes,
-    {
-      foreignAssets: [currencyAsaId],
-      innerTxnCount: 1,
-    },
-  )
-
-  await storeMainBlueprint(config, mainBlueprint)
-  await storeDisputeBlueprint(config, disputeBlueprint)
-
-  const suggestedParams = await config.algodClient.getTransactionParams().do()
-  const depositTxn = makeAssetTransfer(config.sender, appAddr, currencyAsaId, depositAmount, suggestedParams)
-  const boxes = [
-    ...bootstrapBoxRefs(Number(config.appId), numOutcomes),
-    { appIndex: Number(config.appId), name: boxNameAddr('uf:', config.sender) },
-  ]
-
-  await callMarketWithBudget(
-    config,
-    'bootstrap',
-    [depositAmount, { txn: depositTxn, signer: config.signer }],
-    numOutcomes,
-    { boxOverride: boxes },
   )
 }
 
@@ -668,27 +509,13 @@ async function waitForMarketStatus(appId: number, status: number) {
 type SmokeMarketOptions = {
   deadlineOffsetSecs?: number
   challengeWindowSecs?: number
-  mainBlueprint?: Uint8Array
-  disputeBlueprint?: Uint8Array
+  blueprintCid?: Uint8Array
 }
 
 async function createSmokeMarket(question: string, options: SmokeMarketOptions = {}): Promise<number> {
   debugLog('createSmokeMarket:start', question)
   const deadline = Number(await currentBlockTimestamp()) + (options.deadlineOffsetSecs ?? 15)
-  const params: CreateMarketParams = {
-    creator: creator.addr,
-    currencyAsa: deployment.usdcAsaId,
-    questionHash: new TextEncoder().encode(question),
-    numOutcomes: 2,
-    initialB: 50_000_000n,
-    lpFeeBps: 200,
-    blueprintHash: new TextEncoder().encode('smoke'),
-    deadline,
-    challengeWindowSecs: options.challengeWindowSecs ?? 30,
-    cancellable: false,
-    bootstrapDeposit: 50_000_000n,
-    protocolConfigAppId: deployment.protocolConfigAppId,
-  }
+  
 
   const factoryConfig: ClientConfig = {
     algodClient: algod,
@@ -696,25 +523,22 @@ async function createSmokeMarket(question: string, options: SmokeMarketOptions =
     sender: creator.addr,
     signer: creator.signer,
   }
-  const marketAppId = await createMarketLegacy(factoryConfig, params)
-  debugLog('createSmokeMarket:created', marketAppId)
-
-  const marketConfig: ClientConfig = {
-    algodClient: algod,
-    appId: marketAppId,
-    sender: creator.addr,
-    signer: creator.signer,
-  }
-
-  await manualBootstrapWithBlueprints(
-    marketConfig,
-    50_000_000n,
-    deployment.usdcAsaId,
-    2,
-    options.mainBlueprint ?? buildHumanJudgeBlueprint('main_judge', 'Main Human Judge'),
-    options.disputeBlueprint ?? buildHumanJudgeBlueprint('dispute_judge', 'Dispute Human Judge'),
-  )
-  debugLog('createSmokeMarket:bootstrapped', marketAppId)
+  const result = await createMarketAtomic(factoryConfig, {
+    creator: creator.addr,
+    currencyAsa: deployment.usdcAsaId,
+    questionHash: new TextEncoder().encode(question),
+    numOutcomes: 2,
+    initialB: 0n,
+    lpFeeBps: 200,
+    blueprintCid: options.blueprintCid ?? new TextEncoder().encode("QmTestCid"),
+    deadline,
+    challengeWindowSecs: options.challengeWindowSecs ?? 30,
+    cancellable: false,
+    bootstrapDeposit: 50_000_000n,
+    protocolConfigAppId: deployment.protocolConfigAppId,
+  })
+  const marketAppId = result.marketAppId
+  debugLog('createSmokeMarket:created+bootstrapped', marketAppId)
 
   await waitForIndexerMarket(marketAppId)
   debugLog('createSmokeMarket:indexed', marketAppId)
@@ -912,8 +736,7 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
     const marketAppId = await createSmokeMarket('Will active monitoring propose early?', {
       deadlineOffsetSecs: 600,
       challengeWindowSecs: 10,
-      mainBlueprint: buildEarlyMonitoringBlueprint(),
-      disputeBlueprint: buildHumanJudgeBlueprint('dispute_judge', 'Dispute Human Judge'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
     })
 
     const proposedState = await waitForMarketStatus(marketAppId, 3)
@@ -931,8 +754,7 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
     const marketAppId = await createSmokeMarket('Will challenged early proposal reopen?', {
       deadlineOffsetSecs: 600,
       challengeWindowSecs: 30,
-      mainBlueprint: buildEarlyMonitoringBlueprint(),
-      disputeBlueprint: buildDeferResolutionBlueprint('not terminal yet'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
     })
 
     const challengerMarketConfig: ClientConfig = {

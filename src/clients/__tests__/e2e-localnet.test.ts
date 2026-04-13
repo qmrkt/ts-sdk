@@ -17,14 +17,14 @@ import { fileURLToPath } from 'url'
 import {
   createMarket,
   createMarketAtomic,
-  createMarketLegacy,
   DEFAULT_LP_ENTRY_MAX_PRICE_FP_BIGINT,
   listMarketIds,
   MAX_ACTIVE_LP_OUTCOMES,
   minimumBootstrapDeposit,
+  type CreateMarketAtomicParams,
   type CreateMarketParams,
 } from '../market-factory'
-import { bootstrap, buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit } from '../question-market'
+import { buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit } from '../question-market'
 import { readConfig } from '../protocol-config'
 import type { ClientConfig } from '../base'
 import { getLocalnetAccountByAddress } from './localnet-accounts'
@@ -205,7 +205,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(config.marketFactoryId).toBe(deployment.marketFactoryAppId)
   })
 
-  it('creates a market via factory', async () => {
+  it('creates a market via atomic factory', async () => {
     const deadline = Number(await currentBlockTimestamp()) + 86_400
     const config: ClientConfig = {
       algodClient: algod,
@@ -214,29 +214,29 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const params: CreateMarketParams = {
+    const result = await createMarketAtomic(config, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Test market e2e?'),
       numOutcomes: 2,
-      initialB: 10_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('test-blueprint'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
       bootstrapDeposit: 10_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
-    }
+    })
 
-    const marketAppId = await createMarketLegacy(config, params)
-    expect(marketAppId).toBeGreaterThan(0)
+    expect(result.marketAppId).toBeGreaterThan(0)
+    expect(result.txId).toBeTruthy()
 
-    // Read market state
-    const state = await getMarketState(algod, marketAppId)
-    expect(state.status).toBe(0) // CREATED
+    // Read market state -- atomic create bootstraps to ACTIVE
+    const state = await getMarketState(algod, result.marketAppId)
+    expect(state.status).toBe(1) // ACTIVE
     expect(state.numOutcomes).toBe(2)
-    expect(state.b).toBe(10_000_000n)
+    expect(state.poolBalance).toBe(10_000_000n)
   })
 
   it('rejects unsafe initial_b above bootstrap deposit', async () => {
@@ -248,22 +248,20 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const params: CreateMarketParams = {
+    await expect(createMarketAtomic(config, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Unsafe high-b market?'),
       numOutcomes: 2,
       initialB: 100_000_000n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('test-blueprint'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
       bootstrapDeposit: 10_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
-    }
-
-    await expect(createMarketLegacy(config, params)).rejects.toThrow()
+    })).rejects.toThrow()
   })
 
   it('atomically creates and trades a binary market', async () => {
@@ -283,8 +281,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       numOutcomes: 2,
       initialB: 0n,
       lpFeeBps: 200,
-      mainBlueprint: new TextEncoder().encode('default'),
-      disputeBlueprint: new TextEncoder().encode('default'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
@@ -332,8 +329,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       numOutcomes: 3,
       initialB: 0n,
       lpFeeBps: 200,
-      mainBlueprint: new TextEncoder().encode('default'),
-      disputeBlueprint: new TextEncoder().encode('default'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
@@ -381,8 +377,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       numOutcomes: maxOutcomes,
       initialB: 0n,
       lpFeeBps: 200,
-      mainBlueprint: new TextEncoder().encode('default'),
-      disputeBlueprint: new TextEncoder().encode('default'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
@@ -423,8 +418,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       numOutcomes: maxOutcomes,
       initialB: 0n,
       lpFeeBps: 200,
-      mainBlueprint: new TextEncoder().encode('default'),
-      disputeBlueprint: new TextEncoder().encode('default'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
@@ -522,8 +516,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       numOutcomes: 2,
       initialB: 0n,
       lpFeeBps: 200,
-      mainBlueprint: new TextEncoder().encode('default'),
-      disputeBlueprint: new TextEncoder().encode('default'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
@@ -560,9 +553,9 @@ describe('E2E: Market lifecycle on localnet', () => {
     ).rejects.toThrow(/disabled once any outcome exceeds/i)
   }, 180_000)
 
-  it('bootstraps, buys, and sells on a market', async () => {
+  it('creates, buys, and sells on a market', async () => {
     const deadline = Number(await currentBlockTimestamp()) + 86_400
-    // Create a fresh market
+    // Create a fresh market atomically
     const factoryConfig: ClientConfig = {
       algodClient: algod,
       appId: deployment.marketFactoryAppId,
@@ -570,20 +563,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const result = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Trade test?'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('test'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = result.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -592,8 +586,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    // Bootstrap with the ledger-only market helper.
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
     let state = await getMarketState(algod, marketAppId)
     expect(state.status).toBe(1) // ACTIVE
     expect(state.poolBalance).toBeGreaterThan(0n)
@@ -739,20 +731,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const lifecycleResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Resolution lifecycle test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('lifecycle'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: challengeWindow,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = lifecycleResult.marketAppId
     expect(marketAppId).toBeGreaterThan(0)
 
     const marketConfig: ClientConfig = {
@@ -762,10 +755,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    // ---------------------------------------------------------------
-    // 3. Bootstrap
-    // ---------------------------------------------------------------
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
     let state = await getMarketState(algod, marketAppId)
     expect(state.status).toBe(1) // ACTIVE
 
@@ -975,20 +964,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const disputeResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Dispute lifecycle test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('dispute'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: challengeWindow,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = disputeResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1002,8 +992,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: challengerAddr,
       signer: challengerSigner,
     }
-
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     await buy(marketConfig, 0, 10_000_000n, 2, deployment.usdcAsaId)
     await advanceTimePast(BigInt(shortDeadline + 1))
@@ -1111,20 +1099,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const earlyResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Early resolution finalization test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('early-finalize'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: challengeWindow,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = earlyResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1132,7 +1121,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: deployer,
       signer,
     }
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     const evidenceHash = new Uint8Array(32)
     evidenceHash[0] = 0xAA
@@ -1219,20 +1207,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const earlyDisputeResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Early resolution finalize dispute test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('early-finalize-dispute'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: 120,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = earlyDisputeResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1246,7 +1235,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: challengerAddr,
       signer: challengerSigner,
     }
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     const proposalEvidenceHash = new Uint8Array(32)
     proposalEvidenceHash[0] = 0x5a
@@ -1340,20 +1328,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const abortActiveResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Early resolution abort to active test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('early-abort-active'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: 120,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = abortActiveResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1367,7 +1356,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: challengerAddr,
       signer: challengerSigner,
     }
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     const proposalEvidenceHash = new Uint8Array(32)
     proposalEvidenceHash[0] = 0xAB
@@ -1496,20 +1484,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const abortPendingResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Early resolution abort to pending test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('early-abort-pending'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: challengeWindow,
       cancellable: false,
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = abortPendingResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1523,7 +1512,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: challengerAddr,
       signer: challengerSigner,
     }
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     const proposalEvidenceHash = new Uint8Array(32)
     proposalEvidenceHash[0] = 0x11
@@ -1654,14 +1642,14 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    const marketAppId = await createMarketLegacy(factoryConfig, {
+    const adminDisputeResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('Admin dispute lifecycle test'),
       numOutcomes: 2,
-      initialB: 50_000_000n,
+      initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new TextEncoder().encode('admin-dispute'),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline: shortDeadline,
       challengeWindowSecs: challengeWindow,
       marketAdmin: marketAdmin.addr,
@@ -1669,6 +1657,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       bootstrapDeposit: 50_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const marketAppId = adminDisputeResult.marketAppId
 
     const marketConfig: ClientConfig = {
       algodClient: algod,
@@ -1688,8 +1677,6 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: marketAdmin.addr,
       signer: marketAdmin.signer,
     }
-
-    await bootstrap(marketConfig, 50_000_000n, deployment.usdcAsaId)
 
     await buy(marketConfig, 0, 10_000_000n, 2, deployment.usdcAsaId)
     await advanceTimePast(BigInt(shortDeadline + 1))
@@ -1751,36 +1738,24 @@ describe('E2E: Market lifecycle on localnet', () => {
       algodClient: algod, appId: deployment.marketFactoryAppId,
       sender: deployer, signer,
     }
-    const appId = await createMarketLegacy(factoryConfig, {
+    const threeOutcomeResult = await createMarketAtomic(factoryConfig, {
       creator: deployer,
       currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('3-outcome test'),
       numOutcomes: 3,
       initialB: 0n,
       lpFeeBps: 200,
-      blueprintHash: new Uint8Array(0),
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
       deadline,
       challengeWindowSecs: 120,
       cancellable: true,
       bootstrapDeposit: 100_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
+    const appId = threeOutcomeResult.marketAppId
     expect(appId).toBeGreaterThan(0)
 
-    // Fund and bootstrap
-    const appAddr = algosdk.getApplicationAddress(appId).toString()
-    {
-      const sp = await algod.getTransactionParams().do()
-      const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-        sender: deployer, receiver: appAddr, amount: 5_000_000, suggestedParams: sp,
-      })
-      const atc = new algosdk.AtomicTransactionComposer()
-      atc.addTransaction({ txn, signer })
-      await atc.execute(algod, 4)
-    }
-
     const mc: ClientConfig = { algodClient: algod, appId, sender: deployer, signer }
-    await bootstrap(mc, 100_000_000n, deployment.usdcAsaId)
 
     const state = await getMarketState(algod, appId)
     expect(state.status).toBe(1) // ACTIVE
@@ -1807,28 +1782,18 @@ describe('E2E: Market lifecycle on localnet', () => {
       algodClient: algod, appId: deployment.marketFactoryAppId,
       sender: deployer, signer,
     }
-    const appId = await createMarketLegacy(factoryConfig, {
+    const threeOutcomeLpResult = await createMarketAtomic(factoryConfig, {
       creator: deployer, currencyAsa: deployment.usdcAsaId,
       questionHash: new TextEncoder().encode('5-outcome test'),
       numOutcomes: 3, initialB: 0n, lpFeeBps: 200,
-      blueprintHash: new Uint8Array(0), deadline, challengeWindowSecs: 120,
+      blueprintCid: new TextEncoder().encode("QmTestCid"),
+      deadline, challengeWindowSecs: 120,
       cancellable: true, bootstrapDeposit: 100_000_000n,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
-
-    const appAddr = algosdk.getApplicationAddress(appId).toString()
-    {
-      const sp = await algod.getTransactionParams().do()
-      const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-        sender: deployer, receiver: appAddr, amount: 5_000_000, suggestedParams: sp,
-      })
-      const atc = new algosdk.AtomicTransactionComposer()
-      atc.addTransaction({ txn, signer })
-      await atc.execute(algod, 4)
-    }
+    const appId = threeOutcomeLpResult.marketAppId
 
     const mc: ClientConfig = { algodClient: algod, appId, sender: deployer, signer }
-    await bootstrap(mc, 100_000_000n, deployment.usdcAsaId)
 
     // Buy all 3 outcomes
     for (let i = 0; i < 3; i++) {

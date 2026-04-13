@@ -246,8 +246,7 @@ async function createPreparedMarket(
     // Benchmark the shipped atomic create path and let protocol config materialize b.
     initialB: 0n,
     lpFeeBps: 200,
-    mainBlueprint: new TextEncoder().encode(`budget-main-${label}`),
-    disputeBlueprint: new TextEncoder().encode(`budget-dispute-${label}`),
+    blueprintCid: new TextEncoder().encode("QmTestCid"),
     deadline,
     challengeWindowSecs: resolvedChallengeWindowSecs,
     marketAdmin: marketAdminAddr,

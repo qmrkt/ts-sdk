@@ -14,9 +14,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 
-import { createMarketLegacy, type CreateMarketParams } from '../market-factory'
+import { createMarketAtomic, type CreateMarketAtomicParams } from '../market-factory'
 import {
-  bootstrap, buy, sell, getMarketState,
+  buy, sell, getMarketState,
   triggerResolution, proposeResolution, finalizeResolution, claim,
   provideLiquidity, withdrawLiquidity, cancel, refund,
 } from '../question-market'
@@ -156,29 +156,19 @@ async function createAndBootstrapMarket(opts: {
   const blockTs = await currentBlockTs()
   const deadline = Number(blockTs) + Math.max(deadlineOffsetSecs, challengeWindowSecs + 30, 120)
 
-  // Fund factory for box MBR
-  const factoryAddr = algosdk.getApplicationAddress(deployment.marketFactoryAppId).toString()
-  const fSp = await algod.getTransactionParams().do()
-  const fTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-    sender: accounts[0].addr, receiver: factoryAddr, amount: 2_000_000n, suggestedParams: fSp,
-  })
-  const fAtc = new algosdk.AtomicTransactionComposer()
-  fAtc.addTransaction({ txn: fTxn, signer: accounts[0].signer })
-  await fAtc.execute(algod, 4)
-
   const config: ClientConfig = {
     algodClient: algod, appId: deployment.marketFactoryAppId,
     sender: creator.addr, signer: creator.signer,
   }
 
-  const appId = await createMarketLegacy(config, {
+  const result = await createMarketAtomic(config, {
     creator: creator.addr,
     currencyAsa: deployment.usdcAsaId,
     questionHash: new TextEncoder().encode(`Stress test ${Date.now()}`),
     numOutcomes,
     initialB: 0n,
     lpFeeBps: 200,
-    blueprintHash: new Uint8Array(0),
+    blueprintCid: new TextEncoder().encode("QmTestCid"),
     deadline,
     challengeWindowSecs,
     cancellable,
@@ -186,22 +176,7 @@ async function createAndBootstrapMarket(opts: {
     protocolConfigAppId: deployment.protocolConfigAppId,
   })
 
-  // Fund market app
-  const appAddr = algosdk.getApplicationAddress(appId).toString()
-  await fundAlgo(creator, 5_000_000n) // ensure creator has ALGO
-  const sp = await algod.getTransactionParams().do()
-  const fundTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-    sender: creator.addr, receiver: appAddr, amount: 5_000_000n, suggestedParams: sp,
-  })
-  const fundAtc = new algosdk.AtomicTransactionComposer()
-  fundAtc.addTransaction({ txn: fundTxn, signer: creator.signer })
-  await fundAtc.execute(algod, 4)
-
-  // Bootstrap
-  const mc: ClientConfig = { algodClient: algod, appId, sender: creator.addr, signer: creator.signer }
-  await bootstrap(mc, liquidityUsdc, deployment.usdcAsaId)
-
-  return { appId, deadline }
+  return { appId: result.marketAppId, deadline }
 }
 
 function marketConfig(account: Account, appId: number): ClientConfig {

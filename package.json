@@ -1,6 +1,6 @@
 {
   "name": "@questionmarket/sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "TypeScript SDK for question.market prediction market contracts on Algorand",
   "type": "module",
   "main": "dist/index.js",
@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vitest": "^2.1.9"
   },

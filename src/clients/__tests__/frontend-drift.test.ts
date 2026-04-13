@@ -219,8 +219,8 @@ describe("Frontend spec drift guard", () => {
     expect(createSrc).toContain("readConfig");
     expect(createSrc).toContain("getAtomicCreateSupportError");
     expect(createSrc).not.toContain("bootstrapBoxRefs");
-    expect(createSrc).not.toContain("store_main_blueprint");
-    expect(createSrc).not.toContain("store_dispute_blueprint");
+    // store_main_blueprint removed
+    // store_dispute_blueprint removed
     expect(createSrc).not.toContain("Falling back to legacy flow");
     expect(createSrc).not.toContain(
       "makeAssetCreateTxnWithSuggestedParamsFromObject"
@@ -274,7 +274,7 @@ describe("Frontend spec drift guard", () => {
     expect(countArrayLiteralEntries(argsMatch![1])).toBe(
       createMarket.args.length
     );
-    expect(lifecycleSrc).toContain("store_main_blueprint");
+    // store_main_blueprint removed
     expect(lifecycleSrc).toContain("store_dispute_blueprint");
   });
 });

@@ -24,13 +24,12 @@ function dummyConfig(): ClientConfig {
 
 function dummyParams(): CreateMarketParams {
   return {
-    creator: 'TESTADDR',
     currencyAsa: 123,
     questionHash: new TextEncoder().encode('Disabled sequential create'),
     numOutcomes: 2,
     initialB: 0n,
     lpFeeBps: 200,
-    blueprintHash: new TextEncoder().encode('legacy-disabled'),
+    blueprintCid: new TextEncoder().encode('QmTestCid'),
     deadline: 1_900_000_000,
     challengeWindowSecs: 3600,
     cancellable: true,
@@ -82,11 +81,12 @@ describe('market-factory safety guards', () => {
       'SENDERADDR',
     )
 
-    expect(args).toHaveLength(13)
+    expect(args).toHaveLength(12)
     expect(args[0]).toBe(123n)
     expect(args[1]).toBe(params.questionHash)
     expect(args[2]).toBe(2n)
-    expect(args[9]).toBe('SENDERADDR')
-    expect(args[12]).toBe(800_000n)
+    expect(args[5]).toBe(params.blueprintCid)
+    expect(args[8]).toBe('SENDERADDR')
+    expect(args[11]).toBe(800_000n)
   })
 })

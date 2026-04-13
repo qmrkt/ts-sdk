@@ -4,9 +4,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 
-import { createMarketLegacy, type CreateMarketParams } from '../market-factory'
+import { createMarketAtomic, type CreateMarketAtomicParams } from '../market-factory'
 import {
-  bootstrap,
   buy,
   cancel,
   claimLpResidual,
@@ -268,14 +267,14 @@ async function createBootstrappedBinaryMarket(
     signer: owner.signer,
   }
 
-  const params: CreateMarketParams = {
+  const params: CreateMarketAtomicParams = {
     creator: owner.addr,
     currencyAsa: deployment.usdcAsaId,
     questionHash: new TextEncoder().encode(`Atomicity ${label}`),
     numOutcomes: 2,
-    initialB: 50_000_000n,
+    initialB: 0n,
     lpFeeBps: 200,
-    blueprintHash: new TextEncoder().encode(`atomicity-${label}`),
+    blueprintCid: new TextEncoder().encode("QmTestBlueprintCid"),
     deadline,
     challengeWindowSecs,
     cancellable: opts?.cancellable ?? true,
@@ -283,14 +282,14 @@ async function createBootstrappedBinaryMarket(
     protocolConfigAppId: deployment.protocolConfigAppId,
   }
 
-  const appId = await createMarketLegacy(factoryConfig, params)
+  const result = await createMarketAtomic(factoryConfig, params)
+  const appId = result.marketAppId
   const marketConfig: ClientConfig = {
     algodClient: algod,
     appId,
     sender: owner.addr,
     signer: owner.signer,
   }
-  await bootstrap(marketConfig, BOOTSTRAP_DEPOSIT, deployment.usdcAsaId)
 
   return {
     appId,
