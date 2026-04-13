@@ -25,19 +25,28 @@ export class AtomicCreateUnsupportedError extends Error {
   }
 }
 
-function extractCreatedAppIdFromPendingResult(result: any): number | undefined {
+interface PendingTransactionResultLike {
+  applicationIndex?: unknown
+  'application-index'?: unknown
+  innerTxns?: unknown
+  'inner-txns'?: unknown
+}
+
+function extractCreatedAppIdFromPendingResult(result: PendingTransactionResultLike | null | undefined): number | undefined {
   const directAppId = Number(result?.applicationIndex ?? result?.['application-index'] ?? 0)
   if (directAppId > 0) {
     return directAppId
   }
 
-  const innerTxns = result?.innerTxns ?? result?.['inner-txns'] ?? []
+  const innerTxns = result?.innerTxns ?? result?.['inner-txns']
   if (!Array.isArray(innerTxns)) {
     return undefined
   }
 
   for (const inner of innerTxns) {
-    const nestedAppId = extractCreatedAppIdFromPendingResult(inner)
+    const nestedAppId = extractCreatedAppIdFromPendingResult(
+      inner && typeof inner === 'object' ? (inner as PendingTransactionResultLike) : undefined,
+    )
     if (nestedAppId !== undefined) {
       return nestedAppId
     }

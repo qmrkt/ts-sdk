@@ -1,6 +1,6 @@
 {
   "name": "@questionmarket/sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "TypeScript SDK for question.market prediction market contracts on Algorand",
   "type": "module",
   "main": "dist/index.js",
@@ -34,6 +34,8 @@
     "build": "tsc",
     "postbuild": "node ./scripts/copy-client-specs.mjs",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:runtime": "node ./scripts/test-runtime-exports.mjs",
     "test:drift": "vitest run --config vitest.integration.config.ts src/clients/__tests__/frontend-drift.test.ts",
@@ -47,9 +49,13 @@
     "pinata": "^1.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.24.0",
     "@types/node": "^22.13.10",
+    "eslint": "^9.24.0",
+    "globals": "^16.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.29.0",
     "vitest": "^2.1.9"
   },
   "repository": {

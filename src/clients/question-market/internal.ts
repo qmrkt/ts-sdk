@@ -388,23 +388,52 @@ function decodeBase64Bytes(value: string): Uint8Array {
   return textEncoder.encode(value)
 }
 
+interface AccountStateValueLike {
+  type?: unknown
+  uint?: unknown
+  bytes?: unknown
+}
+
+interface AccountStateEntryLike {
+  key?: unknown
+  value?: AccountStateValueLike
+}
+
+interface AccountAppLocalStateLike {
+  id?: unknown
+  appId?: unknown
+  'key-value'?: unknown
+  keyValue?: unknown
+}
+
+interface AccountInformationLike {
+  'apps-local-state'?: unknown
+  appsLocalState?: unknown
+}
+
 export async function readAccountLocalState(
   algod: algosdk.Algodv2,
   appId: number,
   address: string,
 ): Promise<Record<string, bigint | Uint8Array>> {
-  const accountInfo = await algod.accountInformation(address).do() as Record<string, any>
-  const appStates = accountInfo['apps-local-state'] ?? accountInfo.appsLocalState ?? []
-  const appState = appStates.find((entry: any) => Number(entry.id ?? entry.appId) === appId)
+  const accountInfo = (await algod.accountInformation(address).do()) as AccountInformationLike
+  const appStatesRaw = accountInfo['apps-local-state'] ?? accountInfo.appsLocalState
+  const appStates = Array.isArray(appStatesRaw) ? (appStatesRaw as AccountAppLocalStateLike[]) : []
+  const appState = appStates.find((entry) => Number(entry.id ?? entry.appId) === appId)
   if (!appState) return {}
 
-  const keyValue = appState['key-value'] ?? appState.keyValue ?? []
+  const keyValueRaw = appState['key-value'] ?? appState.keyValue
+  const keyValue = Array.isArray(keyValueRaw) ? (keyValueRaw as AccountStateEntryLike[]) : []
   const localState: Record<string, bigint | Uint8Array> = {}
   for (const entry of keyValue) {
     const key = new TextDecoder().decode(decodeBase64Bytes(String(entry.key ?? '')))
     const value = entry.value ?? {}
+    const uintValue =
+      typeof value.uint === 'bigint' || typeof value.uint === 'number' || typeof value.uint === 'string'
+        ? value.uint
+        : 0
     if (Number(value.type ?? 0) === 2) {
-      localState[key] = BigInt(value.uint ?? 0)
+      localState[key] = BigInt(uintValue)
     } else if (typeof value.bytes === 'string') {
       localState[key] = decodeBase64Bytes(value.bytes)
     }

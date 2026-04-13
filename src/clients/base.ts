@@ -58,13 +58,19 @@ export interface MethodCallOptions {
   innerTxnCount?: number
 }
 
+type AbiMethodDefinition = ConstructorParameters<typeof algosdk.ABIMethod>[0] & { name: string }
+
+interface Arc56ContractSpec {
+  methods: AbiMethodDefinition[]
+}
+
 /**
  * Load ABIMethod objects from an ARC56 spec's methods array.
  */
-export function loadMethods(spec: any): Map<string, algosdk.ABIMethod> {
+export function loadMethods(spec: Arc56ContractSpec): Map<string, algosdk.ABIMethod> {
   const methods = new Map<string, algosdk.ABIMethod>()
-  for (const m of spec.methods) {
-    methods.set(m.name, new algosdk.ABIMethod(m))
+  for (const methodSpec of spec.methods) {
+    methods.set(methodSpec.name, new algosdk.ABIMethod(methodSpec))
   }
   return methods
 }

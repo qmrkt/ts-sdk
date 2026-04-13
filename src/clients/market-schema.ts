@@ -196,13 +196,78 @@ export function deriveResolutionClassFromBlueprint(blueprint: unknown): number {
   return RESOLUTION_CLASS_SOURCE_BASED
 }
 
-export function normalizeIndexerLpStake(raw: any): NormalizedIndexerLpStake {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+interface IndexerLpStakeInput extends Record<string, unknown> {
+  appId?: unknown
+  address?: unknown
+  shares?: unknown
+  feeSnapshot?: unknown
+  claimableFees?: unknown
+}
+
+interface IndexerMarketInput extends Record<string, unknown> {
+  appId?: unknown
+  question?: unknown
+  outcomes?: unknown
+  status?: unknown
+  numOutcomes?: unknown
+  b?: unknown
+  poolBalance?: unknown
+  lpSharesTotal?: unknown
+  lpFeeBps?: unknown
+  protocolFeeBps?: unknown
+  activationTimestamp?: unknown
+  deadline?: unknown
+  resolutionClass?: unknown
+  executionAssuranceTier?: unknown
+  lpEntryMaxPriceFp?: unknown
+  resolutionPendingSince?: unknown
+  quantities?: unknown
+  prices?: unknown
+  creator?: unknown
+  resolutionAuthority?: unknown
+  marketAdmin?: unknown
+  cancellable?: unknown
+  challengeWindowSecs?: unknown
+  proposalTimestamp?: unknown
+  proposalEvidenceHash?: unknown
+  proposer?: unknown
+  proposalBond?: unknown
+  gracePeriodSecs?: unknown
+  proposerBondHeld?: unknown
+  challengeBond?: unknown
+  challenger?: unknown
+  challengeReasonCode?: unknown
+  challengeEvidenceHash?: unknown
+  challengerBondHeld?: unknown
+  disputeRefHash?: unknown
+  disputeOpenedAt?: unknown
+  disputeDeadline?: unknown
+  rulingHash?: unknown
+  resolutionPathUsed?: unknown
+  disputeBackendKind?: unknown
+  pendingResponderRole?: unknown
+  disputeSinkBalance?: unknown
+  winningOutcome?: unknown
+  blueprintSummary?: unknown
+  questionHash?: unknown
+  volume?: unknown
+  imageCid?: unknown
+  contractVersion?: number | string | bigint
+}
+
+export function normalizeIndexerLpStake(raw: unknown): NormalizedIndexerLpStake {
+  const stake = (asRecord(raw) ?? {}) as IndexerLpStakeInput
+
   return {
-    appId: Number(raw?.appId ?? 0),
-    address: String(raw?.address ?? ''),
-    shares: String(raw?.shares ?? '0'),
-    feeSnapshot: String(raw?.feeSnapshot ?? '0'),
-    claimableFees: String(raw?.claimableFees ?? '0'),
+    appId: Number(stake.appId ?? 0),
+    address: String(stake.address ?? ''),
+    shares: String(stake.shares ?? '0'),
+    feeSnapshot: String(stake.feeSnapshot ?? '0'),
+    claimableFees: String(stake.claimableFees ?? '0'),
   }
 }
 
@@ -220,57 +285,58 @@ function normalizeOutcomeCount(raw: unknown): number {
   return Math.min(16, Math.max(0, Math.trunc(parsed)))
 }
 
-export function normalizeIndexerMarket(raw: any): NormalizedIndexerMarket {
-  const numOutcomes = normalizeOutcomeCount(raw?.numOutcomes)
+export function normalizeIndexerMarket(raw: unknown): NormalizedIndexerMarket {
+  const market = (asRecord(raw) ?? {}) as IndexerMarketInput
+  const numOutcomes = normalizeOutcomeCount(market.numOutcomes)
 
   return {
-    appId: Number(raw?.appId ?? 0),
-    contractVersion: getMarketContractVersion(raw),
-    question: String(raw?.question ?? `Market #${raw?.appId ?? 0}`),
-    outcomes: parseOutcomeLabels(raw?.outcomes, numOutcomes),
-    status: Number(raw?.status ?? 0),
+    appId: Number(market.appId ?? 0),
+    contractVersion: getMarketContractVersion(market),
+    question: String(market.question ?? `Market #${market.appId ?? 0}`),
+    outcomes: parseOutcomeLabels(market.outcomes, numOutcomes),
+    status: Number(market.status ?? 0),
     numOutcomes,
-    b: String(raw?.b ?? '0'),
-    poolBalance: String(raw?.poolBalance ?? '0'),
-    lpSharesTotal: String(raw?.lpSharesTotal ?? '0'),
-    lpFeeBps: Number(raw?.lpFeeBps ?? 0),
-    protocolFeeBps: Number(raw?.protocolFeeBps ?? 0),
-    activationTimestamp: Number(raw?.activationTimestamp ?? 0),
-    deadline: Number(raw?.deadline ?? 0),
-    resolutionClass: Number(raw?.resolutionClass ?? DEFAULT_RESOLUTION_CLASS),
-    executionAssuranceTier: Number(raw?.executionAssuranceTier ?? DEFAULT_EXECUTION_ASSURANCE_TIER),
-    lpEntryMaxPriceFp: Number(raw?.lpEntryMaxPriceFp ?? DEFAULT_LP_ENTRY_MAX_PRICE_FP),
-    resolutionPendingSince: Number(raw?.resolutionPendingSince ?? 0),
-    quantities: parseExactStringArray(raw?.quantities, numOutcomes).slice(0, Math.max(numOutcomes, 0)),
-    prices: parsePrices(raw?.prices, numOutcomes),
-    creator: String(raw?.creator ?? ''),
-    resolutionAuthority: String(raw?.resolutionAuthority ?? ''),
-    marketAdmin: String(raw?.marketAdmin ?? ''),
-    cancellable: Boolean(raw?.cancellable ?? 0),
-    challengeWindowSecs: Number(raw?.challengeWindowSecs ?? 0),
-    proposalTimestamp: Number(raw?.proposalTimestamp ?? 0),
-    proposalEvidenceHash: String(raw?.proposalEvidenceHash ?? ''),
-    proposer: String(raw?.proposer ?? ''),
-    proposalBond: String(raw?.proposalBond ?? '0'),
-    gracePeriodSecs: Number(raw?.gracePeriodSecs ?? 0),
-    proposerBondHeld: String(raw?.proposerBondHeld ?? '0'),
-    challengeBond: String(raw?.challengeBond ?? '0'),
-    challenger: String(raw?.challenger ?? ''),
-    challengeReasonCode: Number(raw?.challengeReasonCode ?? 0),
-    challengeEvidenceHash: String(raw?.challengeEvidenceHash ?? ''),
-    challengerBondHeld: String(raw?.challengerBondHeld ?? '0'),
-    disputeRefHash: String(raw?.disputeRefHash ?? ''),
-    disputeOpenedAt: Number(raw?.disputeOpenedAt ?? 0),
-    disputeDeadline: Number(raw?.disputeDeadline ?? 0),
-    rulingHash: String(raw?.rulingHash ?? ''),
-    resolutionPathUsed: Number(raw?.resolutionPathUsed ?? 0),
-    disputeBackendKind: Number(raw?.disputeBackendKind ?? 0),
-    pendingResponderRole: Number(raw?.pendingResponderRole ?? 0),
-    disputeSinkBalance: String(raw?.disputeSinkBalance ?? '0'),
-    winningOutcome: Number(raw?.winningOutcome ?? 0),
-    blueprintSummary: String(raw?.blueprintSummary ?? ''),
-    questionHash: String(raw?.questionHash ?? ''),
-    volume: String(raw?.volume ?? '0'),
-    imageCid: String(raw?.imageCid ?? ''),
+    b: String(market.b ?? '0'),
+    poolBalance: String(market.poolBalance ?? '0'),
+    lpSharesTotal: String(market.lpSharesTotal ?? '0'),
+    lpFeeBps: Number(market.lpFeeBps ?? 0),
+    protocolFeeBps: Number(market.protocolFeeBps ?? 0),
+    activationTimestamp: Number(market.activationTimestamp ?? 0),
+    deadline: Number(market.deadline ?? 0),
+    resolutionClass: Number(market.resolutionClass ?? DEFAULT_RESOLUTION_CLASS),
+    executionAssuranceTier: Number(market.executionAssuranceTier ?? DEFAULT_EXECUTION_ASSURANCE_TIER),
+    lpEntryMaxPriceFp: Number(market.lpEntryMaxPriceFp ?? DEFAULT_LP_ENTRY_MAX_PRICE_FP),
+    resolutionPendingSince: Number(market.resolutionPendingSince ?? 0),
+    quantities: parseExactStringArray(market.quantities, numOutcomes).slice(0, Math.max(numOutcomes, 0)),
+    prices: parsePrices(market.prices, numOutcomes),
+    creator: String(market.creator ?? ''),
+    resolutionAuthority: String(market.resolutionAuthority ?? ''),
+    marketAdmin: String(market.marketAdmin ?? ''),
+    cancellable: Boolean(market.cancellable ?? 0),
+    challengeWindowSecs: Number(market.challengeWindowSecs ?? 0),
+    proposalTimestamp: Number(market.proposalTimestamp ?? 0),
+    proposalEvidenceHash: String(market.proposalEvidenceHash ?? ''),
+    proposer: String(market.proposer ?? ''),
+    proposalBond: String(market.proposalBond ?? '0'),
+    gracePeriodSecs: Number(market.gracePeriodSecs ?? 0),
+    proposerBondHeld: String(market.proposerBondHeld ?? '0'),
+    challengeBond: String(market.challengeBond ?? '0'),
+    challenger: String(market.challenger ?? ''),
+    challengeReasonCode: Number(market.challengeReasonCode ?? 0),
+    challengeEvidenceHash: String(market.challengeEvidenceHash ?? ''),
+    challengerBondHeld: String(market.challengerBondHeld ?? '0'),
+    disputeRefHash: String(market.disputeRefHash ?? ''),
+    disputeOpenedAt: Number(market.disputeOpenedAt ?? 0),
+    disputeDeadline: Number(market.disputeDeadline ?? 0),
+    rulingHash: String(market.rulingHash ?? ''),
+    resolutionPathUsed: Number(market.resolutionPathUsed ?? 0),
+    disputeBackendKind: Number(market.disputeBackendKind ?? 0),
+    pendingResponderRole: Number(market.pendingResponderRole ?? 0),
+    disputeSinkBalance: String(market.disputeSinkBalance ?? '0'),
+    winningOutcome: Number(market.winningOutcome ?? 0),
+    blueprintSummary: String(market.blueprintSummary ?? ''),
+    questionHash: String(market.questionHash ?? ''),
+    volume: String(market.volume ?? '0'),
+    imageCid: String(market.imageCid ?? ''),
   }
 }
