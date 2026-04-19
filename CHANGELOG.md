@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (2026-04-19)
+
+- **Bug fix**: `getMarketState` now decodes outcome quantities from the `qp` global-state value (8 x UInt64 BE, sliced to `numOutcomes`). Previously it read them from per-outcome boxes (`q<idx>`) that the current contract does not create, so every call silently returned `quantities = [0, 0, ...]` and `prices` stuck at the uniform baseline (50/50 for binary, 20/20/20/20/20 for 5-outcome, etc.). All downstream consumers (frontends, MCP servers, indexers that use the SDK) were displaying stuck prices regardless of on-chain state.
+- Exported `SHARE_UNIT` from the public `question-market` entrypoint.
+- Added an `e2e-localnet` test (`getMarketState reflects actual on-chain quantities and LMSR prices`) that deploys binary + multi-outcome markets, executes asymmetric buys, and asserts quantities and price ordering. Fails against the prior box-reading code path.
+- Tightened the previously trivially-passing `state.quantities[i] >= 0n` assertion in the 3-outcome buy+sell LP test.
+- `deploy-localnet.ts` now waits up to 30s for algod + kmd to become ready after `algokit localnet reset` instead of erroring out on the first failed status probe.
+- `sdkVersion` bumped to `0.3.1`.
+
 ## 0.3.0 (2026-04-18)
 
 - Blueprint type system rewrite: replaced legacy node types (`market_evidence`, `llm_judge`, `human_judge`, `defer_resolution`, `submit_result`, `cancel_market`) with the engine model (`llm_call`, `agent_loop`, `await_signal`, `cel_eval`, `map`, `gadget`, `validate_blueprint`, `return`)

@@ -17,6 +17,7 @@ export {
   postComment,
   withdrawProtocolFees,
   getMarketState,
+  SHARE_UNIT,
 } from './question-market/internal.js'
 
 export type {

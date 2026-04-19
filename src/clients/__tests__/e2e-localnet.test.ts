@@ -20,7 +20,7 @@ import {
   type CreateMarketAtomicParams,
   type CreateMarketParams,
 } from '../market-factory'
-import { buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit } from '../question-market'
+import { buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerResolution, proposeResolution, proposeEarlyResolution, challengeResolution, finalizeResolution, finalizeDispute, abortEarlyResolution, adminResolveDispute, claim, provideLiquidity, withdrawLiquidity, withdrawPendingPayouts, enterActiveLpForDeposit, SHARE_UNIT } from '../question-market'
 import { readConfig } from '../protocol-config'
 import type { ClientConfig } from '../base'
 import { getLocalnetAccountByAddress } from './localnet-accounts'
@@ -173,7 +173,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     const localnet = await getLocalnetAccountByAddress(algod, deployment.deployer)
     deployer = localnet.addr
     signer = localnet.signer
-  }, 120_000)
+  }, 240_000)
 
   beforeEach(async () => {
     if (!algod || !deployer) return
@@ -1780,8 +1780,79 @@ describe('E2E: Market lifecycle on localnet', () => {
 
     const state = await getMarketState(algod, appId)
     expect(state.status).toBe(1)
-    for (let i = 0; i < 3; i++) {
-      expect(state.quantities[i]).toBeGreaterThanOrEqual(0n)
+    // Bought 1 share of each outcome then sold 1 share of outcome 0.
+    expect(state.quantities[0]).toBe(0n)
+    expect(state.quantities[1]).toBe(SHARE_UNIT)
+    expect(state.quantities[2]).toBe(SHARE_UNIT)
+  })
+
+  it('getMarketState reflects actual on-chain quantities and LMSR prices', async () => {
+    const deadline = Number(await currentBlockTimestamp()) + 86_400
+    const factoryConfig: ClientConfig = {
+      algodClient: algod, appId: deployment.marketFactoryAppId,
+      sender: deployer, signer,
     }
+
+    // Binary market: asymmetric buy must shift prices off the uniform baseline.
+    const binary = await createMarketAtomic(factoryConfig, {
+      creator: deployer, currencyAsa: deployment.usdcAsaId,
+      questionHash: new TextEncoder().encode('price consistency binary'),
+      numOutcomes: 2, initialB: 0n, lpFeeBps: 200,
+      blueprintCid: new TextEncoder().encode('QmTestCid'),
+      deadline, challengeWindowSecs: 3600, cancellable: true,
+      bootstrapDeposit: 100_000_000n,
+      protocolConfigAppId: deployment.protocolConfigAppId,
+    })
+    const binaryMc: ClientConfig = { algodClient: algod, appId: binary.marketAppId, sender: deployer, signer }
+
+    const baseline = await getMarketState(algod, binary.marketAppId)
+    expect(baseline.quantities).toEqual([0n, 0n])
+    expect(baseline.prices[0]).toBe(500_000n)
+    expect(baseline.prices[1]).toBe(500_000n)
+
+    await buy(binaryMc, 1, 20_000_000n, 2, deployment.usdcAsaId, 5n * SHARE_UNIT)
+
+    const afterBuy = await getMarketState(algod, binary.marketAppId)
+    expect(afterBuy.quantities[0]).toBe(0n)
+    expect(afterBuy.quantities[1]).toBe(5n * SHARE_UNIT)
+    // Outcome 1 now clearly leads outcome 0. Threshold is modest because the bootstrap
+    // deposit sets a large b; any real price shift (even ~5%) falsifies the stuck-50/50
+    // regression we are guarding against.
+    expect(afterBuy.prices[1]).toBeGreaterThan(afterBuy.prices[0] + 20_000n)
+    const binarySum = afterBuy.prices[0] + afterBuy.prices[1]
+    expect(binarySum).toBeGreaterThanOrEqual(999_990n)
+    expect(binarySum).toBeLessThanOrEqual(1_000_010n)
+
+    // Multi-outcome market: spread buys across outcomes and verify ordering.
+    const multi = await createMarketAtomic(factoryConfig, {
+      creator: deployer, currencyAsa: deployment.usdcAsaId,
+      questionHash: new TextEncoder().encode('price consistency multi'),
+      numOutcomes: 4, initialB: 0n, lpFeeBps: 200,
+      blueprintCid: new TextEncoder().encode('QmTestCid'),
+      deadline, challengeWindowSecs: 3600, cancellable: true,
+      bootstrapDeposit: 200_000_000n,
+      protocolConfigAppId: deployment.protocolConfigAppId,
+    })
+    const multiMc: ClientConfig = { algodClient: algod, appId: multi.marketAppId, sender: deployer, signer }
+
+    await buy(multiMc, 0, 20_000_000n, 4, deployment.usdcAsaId, 5n * SHARE_UNIT)
+    await buy(multiMc, 2, 10_000_000n, 4, deployment.usdcAsaId, 2n * SHARE_UNIT)
+
+    const multiState = await getMarketState(algod, multi.marketAppId)
+    expect(multiState.quantities[0]).toBe(5n * SHARE_UNIT)
+    expect(multiState.quantities[1]).toBe(0n)
+    expect(multiState.quantities[2]).toBe(2n * SHARE_UNIT)
+    expect(multiState.quantities[3]).toBe(0n)
+    expect(multiState.prices[0]).toBeGreaterThan(multiState.prices[2])
+    expect(multiState.prices[2]).toBeGreaterThan(multiState.prices[1])
+    // Outcomes 1 and 3 both have q=0 so their prices match up to the FP rounding
+    // residual absorbed by the last slot in calculatePrices.
+    const untradedGap = multiState.prices[1] > multiState.prices[3]
+      ? multiState.prices[1] - multiState.prices[3]
+      : multiState.prices[3] - multiState.prices[1]
+    expect(untradedGap).toBeLessThanOrEqual(10n)
+    const multiSum = multiState.prices.reduce((a, p) => a + p, 0n)
+    expect(multiSum).toBeGreaterThanOrEqual(999_990n)
+    expect(multiSum).toBeLessThanOrEqual(1_000_010n)
   })
 }, { timeout: 180_000 })

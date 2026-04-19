@@ -197,7 +197,7 @@ describe.sequential('Stress: adversarial & edge cases', () => {
 
     // Fund deployer with plenty of USDC
     await fundUsdc(accounts[0], 0n).catch(() => {})
-  }, 120_000)
+  }, 240_000)
 
   beforeEach(async () => {
     if (!algod || accounts.length === 0) return

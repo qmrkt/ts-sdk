@@ -63,7 +63,7 @@ export function validateResolutionBlueprint(
   if (blueprint.nodes.length > MAX_BLUEPRINT_NODES) {
     issues.push({
       code: 'TOO_MANY_NODES',
-      message: `Blueprints are capped at ${MAX_BLUEPRINT_NODES} nodes in V1.`,
+      message: `Blueprints are capped at ${MAX_BLUEPRINT_NODES} nodes in the current editor.`,
       severity: 'error',
     })
   }

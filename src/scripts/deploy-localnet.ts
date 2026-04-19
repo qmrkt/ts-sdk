@@ -327,9 +327,20 @@ async function main(): Promise<void> {
   const algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
   const kmd = new algosdk.Kmd(KMD_TOKEN, KMD_SERVER, KMD_PORT)
 
-  try {
-    await algod.status().do()
-  } catch {
+  // Retry briefly after an `algokit localnet reset`: the container takes a few seconds
+  // to bring algod and kmd back up, and the first status call races that restart.
+  const readyDeadline = Date.now() + 30_000
+  let ready = false
+  while (!ready && Date.now() < readyDeadline) {
+    try {
+      await algod.status().do()
+      await kmd.listWallets()
+      ready = true
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+  if (!ready) {
     console.error('ERROR: Localnet not running. Start it with: algokit localnet start')
     process.exit(1)
   }

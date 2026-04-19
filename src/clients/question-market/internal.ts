@@ -1047,13 +1047,15 @@ export async function getMarketState(
 
   const numOutcomes = Number(stateValue<bigint>(gs, 'no', 'num_outcomes') ?? 2n)
 
-  // Read outcome quantities from boxes
+  // Outcome quantities live packed in the 'qp' global-state value: 8 x UInt64 BE = 64 bytes,
+  // sliced to numOutcomes. (Pre-launch versions kept them in per-outcome boxes.)
   const quantities: bigint[] = []
+  const qpBytes = stateValue<Uint8Array>(gs, 'qp', 'quantities_packed')
   for (let i = 0; i < numOutcomes; i++) {
-    try {
-      const val = await readBox(algod, appId, boxName('q', i))
-      quantities.push(algosdk.decodeUint64(val, 'bigint'))
-    } catch {
+    const start = i * 8
+    if (qpBytes && qpBytes.length >= start + 8) {
+      quantities.push(algosdk.decodeUint64(qpBytes.slice(start, start + 8), 'bigint'))
+    } else {
       quantities.push(0n)
     }
   }
