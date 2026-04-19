@@ -18,6 +18,7 @@ import {
   MARKET_LOCAL_WITHDRAWABLE_FEE_SURPLUS,
 } from '../market-schema.js'
 import {
+  AtomicGroupUnsupportedError,
   assertActiveLpSkewWithinCap,
   buildAppOptInIfNeeded,
   buildAsaOptInIfNeeded,
@@ -35,6 +36,17 @@ import {
 } from './internal.js'
 
 const methods = loadMethods(spec)
+const ACTIVE_LP_DELTA_RETRY_LIMIT = 8
+
+function shouldRetryActiveLpDelta(error: unknown): boolean {
+  if (error instanceof AtomicGroupUnsupportedError) return true
+  return /max_deposit|assert failed/i.test(String((error as Error | undefined)?.message ?? error ?? ''))
+}
+
+function reduceActiveLpTargetDeltaB(targetDeltaB: bigint): bigint {
+  const reduction = targetDeltaB / 20n
+  return targetDeltaB - (reduction > 0n ? reduction : 1n)
+}
 
 export async function provideLiquidity(
   config: ClientConfig,
@@ -76,17 +88,38 @@ export async function enterActiveLpForDeposit(
     throw new Error('Deposit is too small to add any active LP depth at the current market price.')
   }
 
-  return enterActiveLp(
-    config,
-    targetDeltaB,
-    maxDeposit,
-    numOutcomes,
-    currencyAsaId,
-    {
-      expectedPrices,
-      priceTolerance: options?.priceTolerance,
-    },
-  )
+  let candidateDeltaB = targetDeltaB
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < ACTIVE_LP_DELTA_RETRY_LIMIT && candidateDeltaB > 0n; attempt += 1) {
+    try {
+      return await enterActiveLp(
+        config,
+        candidateDeltaB,
+        maxDeposit,
+        numOutcomes,
+        currencyAsaId,
+        {
+          expectedPrices,
+          priceTolerance: options?.priceTolerance,
+        },
+      )
+    } catch (error) {
+      lastError = error
+      if (!shouldRetryActiveLpDelta(error) || candidateDeltaB <= 1n) {
+        throw error
+      }
+      const nextDeltaB = reduceActiveLpTargetDeltaB(candidateDeltaB)
+      if (nextDeltaB >= candidateDeltaB) {
+        throw error
+      }
+      candidateDeltaB = nextDeltaB
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Active LP entry failed after exhausting target delta retries.')
 }
 
 export async function enterActiveLp(

@@ -88,13 +88,16 @@ describe('market schema LP helpers', () => {
     expect(normalizeIndexerMarket({ numOutcomes: -5 }).numOutcomes).toBe(0)
   })
 
-  it('derives resolution class from blueprint node types', () => {
+  it('derives resolution class from engine-native blueprint node types', () => {
     expect(deriveResolutionClassFromBlueprint(undefined)).toBe(DEFAULT_RESOLUTION_CLASS)
     expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'api_fetch' }] })).toBe(DEFAULT_RESOLUTION_CLASS)
-    expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'llm_judge' }] })).toBe(
+    expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'llm_call' }] })).toBe(
       RESOLUTION_CLASS_AGENT_ASSISTED,
     )
-    expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'human_judge' }, { type: 'llm_judge' }] })).toBe(
+    expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'agent_loop' }] })).toBe(
+      RESOLUTION_CLASS_AGENT_ASSISTED,
+    )
+    expect(deriveResolutionClassFromBlueprint({ nodes: [{ type: 'await_signal' }, { type: 'llm_call' }] })).toBe(
       RESOLUTION_CLASS_HUMAN_JUDGED,
     )
   })

@@ -1,4 +1,4 @@
-export const sdkVersion = '0.2.1';
+export const sdkVersion = '0.3.0';
 
 /** Fixed-point scale factor (10^6). All prices and quantities use this as the fractional base. */
 export const SCALE = 1_000_000n;

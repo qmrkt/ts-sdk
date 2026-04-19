@@ -16,25 +16,35 @@ describe('resolution blueprint fallback inference', () => {
     expect(fallback?.blueprint.nodes[0]?.type).toBe('api_fetch')
   })
 
-  it('infers participant evidence flows when the summary mentions evidence windows', () => {
+  it('infers api fetch + wait when the summary mentions a grace window', () => {
     const fallback = inferResolutionBlueprintFallback({
       summary:
-        'Collect signed participant evidence during the evidence window, then ask a model to judge the claimed outcome summary.',
+        'Fetch the authoritative API result, wait through the grace period, then resolve automatically.',
     })
 
-    expect(fallback?.presetId).toBe('participant_evidence_llm')
-    expect(fallback?.blueprint.nodes.some((node) => node.type === 'market_evidence')).toBe(true)
+    expect(fallback?.presetId).toBe('api_fetch_wait')
+    expect(fallback?.blueprint.nodes.some((node) => node.type === 'wait')).toBe(true)
   })
 
-  it('falls back to human judge when metadata points at a manual resolver', () => {
+  it('infers validate + gadget flows for dynamic blueprint summaries', () => {
+    const fallback = inferResolutionBlueprintFallback({
+      summary:
+        'Validate blueprint JSON supplied at runtime, then execute the child blueprint through a gadget node.',
+    })
+
+    expect(fallback?.presetId).toBe('validate_blueprint_gadget')
+    expect(fallback?.blueprint.nodes.some((node) => node.type === 'gadget')).toBe(true)
+  })
+
+  it('falls back to await_signal when metadata points at a manual resolver', () => {
     const fallback = inferResolutionBlueprintFallback({
       resolutionAuthority: 'ADDR1',
       creator: 'ADDR1',
       marketAdmin: 'ADDR2',
     })
 
-    expect(fallback?.presetId).toBe('human_judge')
-    expect(fallback?.blueprint.nodes[0]?.type).toBe('human_judge')
+    expect(fallback?.presetId).toBe('await_signal')
+    expect(fallback?.blueprint.nodes[0]?.type).toBe('await_signal')
   })
 
   it('treats empty blueprints as non-renderable', () => {

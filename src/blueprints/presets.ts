@@ -19,54 +19,71 @@ function createBaseBlueprint(
   }
 }
 
-const humanJudgePreset: ResolutionBlueprintPreset = {
-  id: 'human_judge',
-  name: 'Human judge',
-  description: 'Let the market creator or protocol admin resolve the market directly.',
+const awaitSignalPreset: ResolutionBlueprintPreset = {
+  id: 'await_signal',
+  name: 'Await human signal',
+  description: 'Pause for a human response, then return success or cancellation.',
   build() {
     return createBaseBlueprint(
-      'human-judge',
-      'Human Judge Resolution',
-      'Pause for a trusted human resolver, then submit the selected outcome.',
+      'await-signal',
+      'Await Human Signal',
+      'Pause for a human resolver, then emit a terminal return payload.',
       [
         {
-          id: 'judge',
-          type: 'human_judge',
-          label: 'Human Judge',
+          id: 'review',
+          type: 'await_signal',
+          label: 'Human Review',
           position: { x: 0, y: 0 },
           config: {
-            prompt:
-              'Question: {{market.question}}\n' +
-              'Outcomes: {{market.outcomes.indexed}}\n\n' +
-              'Select the correct outcome index for this market.',
-            allowed_responders: ['creator', 'protocol_admin'],
+            reason:
+              'Review the market evidence, select the best supported outcome, and include a short reason.',
+            signal_type: 'human_judgment.responded',
+            correlation_key: 'auto',
             timeout_seconds: 172800,
-            require_reason: true,
-            allow_cancel: true,
+            required_payload: ['outcome', 'reason'],
+            timeout_outputs: {
+              status: 'timeout',
+            },
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 320, y: -80 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 340, y: -80 },
           config: {
-            outcome_key: 'judge.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.review.outcome}}',
+              reason: '{{results.review.reason}}',
+            },
           },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 320, y: 80 },
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 340, y: 80 },
           config: {
-            reason: 'Human judge cancelled or timed out',
+            value: {
+              status: 'cancelled',
+              reason: 'Human review was cancelled or timed out.',
+            },
           },
         },
       ],
       [
-        { from: 'judge', to: 'submit', condition: "judge.status == 'responded' && judge.outcome != ''" },
-        { from: 'judge', to: 'cancel', condition: "judge.status == 'cancelled' || judge.status == 'timeout'" },
+        {
+          from: 'review',
+          to: 'success',
+          condition: "results.review.status == 'responded' && results.review.outcome != ''",
+        },
+        {
+          from: 'review',
+          to: 'cancelled',
+          condition:
+            "results.review.status == 'cancelled' || results.review.status == 'timeout' || results.review.outcome == ''",
+        },
       ],
       {
         max_total_time_seconds: 604800,
@@ -78,12 +95,12 @@ const humanJudgePreset: ResolutionBlueprintPreset = {
 const apiFetchPreset: ResolutionBlueprintPreset = {
   id: 'api_fetch',
   name: 'API fetch',
-  description: 'Resolve directly from an API response with cancellation on failure.',
+  description: 'Resolve directly from an API response using return payloads.',
   build() {
     return createBaseBlueprint(
       'api-fetch',
       'API Fetch Resolution',
-      'Fetch from an API, map the result, then submit.',
+      'Fetch from an API, map the result, then return success or cancellation.',
       [
         {
           id: 'fetch',
@@ -100,27 +117,41 @@ const apiFetchPreset: ResolutionBlueprintPreset = {
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 300, y: -84 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 320, y: -80 },
           config: {
-            outcome_key: 'fetch.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.fetch.outcome}}',
+            },
           },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 300, y: 84 },
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 320, y: 80 },
           config: {
-            reason: 'API fetch did not produce a valid outcome',
+            value: {
+              status: 'cancelled',
+              reason: 'API fetch did not produce a valid outcome.',
+            },
           },
         },
       ],
       [
-        { from: 'fetch', to: 'submit', condition: "fetch.status == 'success' && fetch.outcome != ''" },
-        { from: 'fetch', to: 'cancel', condition: "fetch.status != 'success' || fetch.outcome == ''" },
+        {
+          from: 'fetch',
+          to: 'success',
+          condition: "results.fetch.status == 'success' && results.fetch.outcome != ''",
+        },
+        {
+          from: 'fetch',
+          to: 'cancelled',
+          condition: "results.fetch.status != 'success' || results.fetch.outcome == ''",
+        },
       ],
       {
         max_total_time_seconds: 1800,
@@ -129,53 +160,72 @@ const apiFetchPreset: ResolutionBlueprintPreset = {
   },
 }
 
-const llmJudgePreset: ResolutionBlueprintPreset = {
-  id: 'llm_judge',
-  name: 'LLM judge',
-  description: 'Ask a model to resolve the question directly and cancel if inconclusive.',
+const llmCallPreset: ResolutionBlueprintPreset = {
+  id: 'llm_call',
+  name: 'LLM call',
+  description: 'Ask a model to resolve the question and return a terminal result.',
   build() {
     return createBaseBlueprint(
-      'llm-judge',
-      'LLM Judge Resolution',
+      'llm-call',
+      'LLM Call Resolution',
       'Use a single model to determine the winning outcome.',
       [
         {
           id: 'judge',
-          type: 'llm_judge',
-          label: 'LLM Judge',
+          type: 'llm_call',
+          label: 'LLM Call',
           position: { x: 0, y: 0 },
           config: {
             provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
             prompt:
               'Question: {{market.question}}\n' +
               'Outcomes: {{market.outcomes.indexed}}\n\n' +
               'Return the correct outcome index as structured JSON.',
-            model: 'claude-sonnet-4-6',
+            allowed_outcomes_key: 'inputs.market.outcomes_json',
             timeout_seconds: 60,
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 300, y: -84 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 320, y: -80 },
           config: {
-            outcome_key: 'judge.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.judge.outcome}}',
+              reasoning: '{{results.judge.reasoning}}',
+              confidence: '{{results.judge.confidence}}',
+            },
           },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 300, y: 84 },
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 320, y: 80 },
           config: {
-            reason: 'LLM judge was inconclusive',
+            value: {
+              status: 'cancelled',
+              reason: 'LLM call was inconclusive.',
+            },
           },
         },
       ],
       [
-        { from: 'judge', to: 'submit', condition: "judge.outcome != 'inconclusive' && judge.outcome != ''" },
-        { from: 'judge', to: 'cancel', condition: "judge.outcome == 'inconclusive' || judge.outcome == ''" },
+        {
+          from: 'judge',
+          to: 'success',
+          condition:
+            "results.judge.status == 'success' && results.judge.outcome != '' && results.judge.outcome != 'inconclusive'",
+        },
+        {
+          from: 'judge',
+          to: 'cancelled',
+          condition:
+            "results.judge.status != 'success' || results.judge.outcome == '' || results.judge.outcome == 'inconclusive'",
+        },
       ],
       {
         max_total_time_seconds: 1800,
@@ -185,85 +235,96 @@ const llmJudgePreset: ResolutionBlueprintPreset = {
   },
 }
 
-const apiFetchLLMPreset: ResolutionBlueprintPreset = {
-  id: 'api_fetch_llm',
-  name: 'API fetch + LLM fallback',
-  description: 'Try a deterministic API path first, then ask a model if the fetch fails.',
+const agentLoopPreset: ResolutionBlueprintPreset = {
+  id: 'agent_loop',
+  name: 'Agent loop',
+  description: 'Use a tool-using agent to investigate before returning an outcome.',
   build() {
     return createBaseBlueprint(
-      'api-fetch-llm',
-      'API Fetch + LLM Fallback',
-      'Use API fetch first and escalate to an LLM judge when the API path is insufficient.',
+      'agent-loop',
+      'Agent Loop Resolution',
+      'Run an agent loop with tools, then return success or cancellation.',
       [
         {
-          id: 'fetch',
-          type: 'api_fetch',
-          label: 'API Fetch',
+          id: 'agent',
+          type: 'agent_loop',
+          label: 'Agent Loop',
           position: { x: 0, y: 0 },
           config: {
-            url: 'https://api.example.com/market-resolution',
-            method: 'GET',
-            headers: {},
-            json_path: 'data.outcome',
-            outcome_mapping: {},
-            timeout_seconds: 30,
-          },
-        },
-        {
-          id: 'judge',
-          type: 'llm_judge',
-          label: 'LLM Fallback',
-          position: { x: 300, y: 84 },
-          config: {
             provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            system_prompt:
+              'You are resolving a prediction market. Use tools when helpful, then record the best supported answer.',
             prompt:
               'Question: {{market.question}}\n' +
               'Outcomes: {{market.outcomes.indexed}}\n\n' +
-              'API status: {{fetch.status}}\n' +
-              'API response: {{fetch.raw}}\n' +
-              'API extracted value: {{fetch.extracted}}\n\n' +
-              'Use the API response if it is informative and return the correct outcome index as structured JSON.',
-            model: 'claude-sonnet-4-6',
-            timeout_seconds: 60,
+              'Investigate the question, use tools if needed, then return the correct outcome index.',
+            timeout_seconds: 300,
+            max_steps: 8,
+            max_tool_calls: 12,
+            output_mode: 'resolution',
+            allowed_outcomes_key: 'inputs.market.outcomes_json',
+            tools: [
+              {
+                name: 'fetch_source',
+                kind: 'builtin',
+                builtin: 'source_fetch',
+                description: 'Fetch a public source URL for current evidence.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    url: { type: 'string' },
+                  },
+                  required: ['url'],
+                },
+              },
+            ],
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 620, y: -84 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 340, y: -80 },
           config: {
-            outcome_key: 'fetch.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.agent.outcome}}',
+              reasoning: '{{results.agent.reasoning}}',
+              confidence: '{{results.agent.confidence}}',
+            },
           },
         },
         {
-          id: 'fallback_submit',
-          type: 'submit_result',
-          label: 'Submit Fallback',
-          position: { x: 620, y: 48 },
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 340, y: 80 },
           config: {
-            outcome_key: 'judge.outcome',
-          },
-        },
-        {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 620, y: 180 },
-          config: {
-            reason: 'Neither the API nor the fallback judge produced a valid outcome',
+            value: {
+              status: 'cancelled',
+              reason: 'Agent loop was inconclusive.',
+            },
           },
         },
       ],
       [
-        { from: 'fetch', to: 'submit', condition: "fetch.status == 'success' && fetch.outcome != ''" },
-        { from: 'fetch', to: 'judge', condition: "fetch.status != 'success' || fetch.outcome == ''" },
-        { from: 'judge', to: 'fallback_submit', condition: "judge.outcome != 'inconclusive' && judge.outcome != ''" },
-        { from: 'judge', to: 'cancel', condition: "judge.outcome == 'inconclusive' || judge.outcome == ''" },
+        {
+          from: 'agent',
+          to: 'success',
+          condition:
+            "results.agent.status == 'success' && results.agent.outcome != '' && results.agent.outcome != 'inconclusive'",
+        },
+        {
+          from: 'agent',
+          to: 'cancelled',
+          condition:
+            "results.agent.status != 'success' || results.agent.outcome == '' || results.agent.outcome == 'inconclusive'",
+        },
       ],
       {
         max_total_time_seconds: 1800,
-        max_total_tokens: 100000,
+        max_total_tokens: 140000,
       },
     )
   },
@@ -272,12 +333,12 @@ const apiFetchLLMPreset: ResolutionBlueprintPreset = {
 const apiFetchWaitPreset: ResolutionBlueprintPreset = {
   id: 'api_fetch_wait',
   name: 'API fetch + wait',
-  description: 'Fetch an objective outcome, wait a short window, then submit.',
+  description: 'Fetch an objective outcome, wait briefly, then return it.',
   build() {
     return createBaseBlueprint(
       'api-fetch-wait',
       'API Fetch + Wait',
-      'Use a deterministic fetch, delay, then submit the result.',
+      'Use a deterministic fetch, delay, then emit the final return payload.',
       [
         {
           id: 'fetch',
@@ -297,34 +358,49 @@ const apiFetchWaitPreset: ResolutionBlueprintPreset = {
           id: 'wait',
           type: 'wait',
           label: 'Wait',
-          position: { x: 300, y: -48 },
+          position: { x: 320, y: -48 },
           config: {
             duration_seconds: 300,
+            mode: 'sleep',
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 600, y: -48 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 620, y: -48 },
           config: {
-            outcome_key: 'fetch.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.fetch.outcome}}',
+            },
           },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 300, y: 112 },
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 320, y: 112 },
           config: {
-            reason: 'API fetch failed before the wait gate',
+            value: {
+              status: 'cancelled',
+              reason: 'API fetch failed before the wait gate.',
+            },
           },
         },
       ],
       [
-        { from: 'fetch', to: 'wait', condition: "fetch.status == 'success' && fetch.outcome != ''" },
-        { from: 'fetch', to: 'cancel', condition: "fetch.status != 'success' || fetch.outcome == ''" },
-        { from: 'wait', to: 'submit' },
+        {
+          from: 'fetch',
+          to: 'wait',
+          condition: "results.fetch.status == 'success' && results.fetch.outcome != ''",
+        },
+        {
+          from: 'fetch',
+          to: 'cancelled',
+          condition: "results.fetch.status != 'success' || results.fetch.outcome == ''",
+        },
+        { from: 'wait', to: 'success' },
       ],
       {
         max_total_time_seconds: 3600,
@@ -333,90 +409,225 @@ const apiFetchWaitPreset: ResolutionBlueprintPreset = {
   },
 }
 
-const participantEvidenceLLMPreset: ResolutionBlueprintPreset = {
-  id: 'participant_evidence_llm',
-  name: 'Participant evidence + LLM',
-  description: 'Collect signed participant evidence for 12 hours, then ask a model to resolve.',
+const apiFetchAgentLoopPreset: ResolutionBlueprintPreset = {
+  id: 'api_fetch_agent_loop',
+  name: 'API fetch + agent fallback',
+  description: 'Try a deterministic API path first, then escalate to an agent loop.',
   build() {
     return createBaseBlueprint(
-      'participant-evidence-llm',
-      'Participant Evidence + LLM',
-      'Wait for the evidence window to close, load participant submissions, then judge with an LLM.',
+      'api-fetch-agent-loop',
+      'API Fetch + Agent Fallback',
+      'Use API fetch first and escalate to an agent loop when the API path is insufficient.',
       [
         {
-          id: 'wait',
-          type: 'wait',
-          label: 'Evidence Window',
+          id: 'fetch',
+          type: 'api_fetch',
+          label: 'API Fetch',
           position: { x: 0, y: 0 },
           config: {
-            duration_seconds: 43200,
-            mode: 'defer',
-            start_from: 'resolution_pending_since',
+            url: 'https://api.example.com/market-resolution',
+            method: 'GET',
+            headers: {},
+            json_path: 'data.outcome',
+            outcome_mapping: {},
+            timeout_seconds: 30,
           },
         },
         {
-          id: 'defer',
-          type: 'defer_resolution',
-          label: 'Retry Later',
-          position: { x: 320, y: -96 },
+          id: 'agent',
+          type: 'agent_loop',
+          label: 'Agent Fallback',
+          position: { x: 320, y: 84 },
           config: {
-            reason: 'Evidence window still open',
-          },
-        },
-        {
-          id: 'evidence',
-          type: 'market_evidence',
-          label: 'Participant Evidence',
-          position: { x: 320, y: 48 },
-          config: {},
-        },
-        {
-          id: 'judge',
-          type: 'llm_judge',
-          label: 'LLM Judge',
-          position: { x: 640, y: 48 },
-          config: {
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
             prompt:
               'Question: {{market.question}}\n' +
-              'Outcomes: {{market.outcomes.indexed}}\n' +
-              'Participant evidence count: {{evidence.count}}\n' +
-              'Claimed outcome summary: {{evidence.claimed_summary}}\n\n' +
-              'Participant evidence entries JSON:\n{{evidence.entries_json}}\n\n' +
-              'Use the participant evidence bundle to determine the correct outcome index. ' +
-              'If the evidence is insufficient or contradictory, return inconclusive.',
-            model: 'claude-sonnet-4-6',
-            timeout_seconds: 60,
+              'Outcomes: {{market.outcomes.indexed}}\n\n' +
+              'API status: {{results.fetch.status}}\n' +
+              'API raw response: {{results.fetch.raw}}\n' +
+              'API extracted value: {{results.fetch.json_path_value}}\n\n' +
+              'Investigate the question and return the correct outcome index.',
+            output_mode: 'resolution',
+            allowed_outcomes_key: 'inputs.market.outcomes_json',
+            timeout_seconds: 300,
+            max_steps: 8,
+            max_tool_calls: 12,
+            tools: [
+              {
+                name: 'fetch_source',
+                kind: 'builtin',
+                builtin: 'source_fetch',
+                description: 'Fetch a public source URL for current evidence.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    url: { type: 'string' },
+                  },
+                  required: ['url'],
+                },
+              },
+            ],
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          label: 'Submit',
-          position: { x: 960, y: -24 },
+          id: 'success',
+          type: 'return',
+          label: 'Return Success',
+          position: { x: 660, y: -84 },
           config: {
-            outcome_key: 'judge.outcome',
+            value: {
+              status: 'success',
+              outcome: '{{results.fetch.outcome}}',
+            },
           },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          label: 'Cancel',
-          position: { x: 960, y: 120 },
+          id: 'agent_success',
+          type: 'return',
+          label: 'Return Agent Success',
+          position: { x: 660, y: 48 },
           config: {
-            reason: 'Participant evidence judge was inconclusive',
+            value: {
+              status: 'success',
+              outcome: '{{results.agent.outcome}}',
+              reasoning: '{{results.agent.reasoning}}',
+            },
+          },
+        },
+        {
+          id: 'cancelled',
+          type: 'return',
+          label: 'Return Cancelled',
+          position: { x: 660, y: 180 },
+          config: {
+            value: {
+              status: 'cancelled',
+              reason: 'Neither the API path nor the agent fallback produced a valid outcome.',
+            },
           },
         },
       ],
       [
-        { from: 'wait', to: 'defer', condition: "wait.status == 'waiting'" },
-        { from: 'wait', to: 'evidence', condition: "wait.status == 'success'" },
-        { from: 'evidence', to: 'judge', condition: "evidence.status == 'success'" },
-        { from: 'evidence', to: 'cancel', condition: "evidence.status != 'success'" },
-        { from: 'judge', to: 'submit', condition: "judge.outcome != 'inconclusive' && judge.outcome != ''" },
-        { from: 'judge', to: 'cancel', condition: "judge.outcome == 'inconclusive' || judge.outcome == ''" },
+        {
+          from: 'fetch',
+          to: 'success',
+          condition: "results.fetch.status == 'success' && results.fetch.outcome != ''",
+        },
+        {
+          from: 'fetch',
+          to: 'agent',
+          condition: "results.fetch.status != 'success' || results.fetch.outcome == ''",
+        },
+        {
+          from: 'agent',
+          to: 'agent_success',
+          condition:
+            "results.agent.status == 'success' && results.agent.outcome != '' && results.agent.outcome != 'inconclusive'",
+        },
+        {
+          from: 'agent',
+          to: 'cancelled',
+          condition:
+            "results.agent.status != 'success' || results.agent.outcome == '' || results.agent.outcome == 'inconclusive'",
+        },
       ],
       {
-        max_total_time_seconds: 172800,
+        max_total_time_seconds: 2400,
+        max_total_tokens: 140000,
+      },
+    )
+  },
+}
+
+const validateBlueprintGadgetPreset: ResolutionBlueprintPreset = {
+  id: 'validate_blueprint_gadget',
+  name: 'Validate + gadget',
+  description: 'Validate a runtime blueprint, then execute it as a child run.',
+  build() {
+    return createBaseBlueprint(
+      'validate-blueprint-gadget',
+      'Validate + Gadget',
+      'Validate runtime blueprint JSON, then execute it through gadget and return the child payload.',
+      [
+        {
+          id: 'validate',
+          type: 'validate_blueprint',
+          label: 'Validate Blueprint',
+          position: { x: 0, y: 0 },
+          config: {
+            blueprint_json_key: 'inputs.dynamic_blueprint_json',
+          },
+        },
+        {
+          id: 'run',
+          type: 'gadget',
+          label: 'Run Gadget',
+          position: { x: 320, y: -60 },
+          config: {
+            blueprint_json_key: 'inputs.dynamic_blueprint_json',
+            timeout_seconds: 120,
+            max_depth: 1,
+          },
+        },
+        {
+          id: 'invalid',
+          type: 'return',
+          label: 'Return Invalid',
+          position: { x: 320, y: 80 },
+          config: {
+            value: {
+              status: 'cancelled',
+              reason: 'Dynamic blueprint failed validation.',
+            },
+          },
+        },
+        {
+          id: 'success',
+          type: 'return',
+          label: 'Return Child Result',
+          position: { x: 620, y: -120 },
+          config: {
+            from_key: 'results.run.return_json',
+          },
+        },
+        {
+          id: 'child_failed',
+          type: 'return',
+          label: 'Return Child Failure',
+          position: { x: 620, y: 20 },
+          config: {
+            value: {
+              status: 'cancelled',
+              reason: 'Dynamic blueprint execution failed.',
+            },
+          },
+        },
+      ],
+      [
+        {
+          from: 'validate',
+          to: 'run',
+          condition: "results.validate.valid == 'true'",
+        },
+        {
+          from: 'validate',
+          to: 'invalid',
+          condition: "results.validate.valid != 'true'",
+        },
+        {
+          from: 'run',
+          to: 'success',
+          condition: "results.run.status == 'success' && results.run.return_json != ''",
+        },
+        {
+          from: 'run',
+          to: 'child_failed',
+          condition: "results.run.status != 'success' || results.run.return_json == ''",
+        },
+      ],
+      {
+        max_total_time_seconds: 600,
         max_total_tokens: 120000,
       },
     )
@@ -427,12 +638,13 @@ export const RESOLUTION_BLUEPRINT_PRESETS: Record<
   ResolutionBlueprintPresetId,
   ResolutionBlueprintPreset
 > = {
-  human_judge: humanJudgePreset,
+  await_signal: awaitSignalPreset,
   api_fetch: apiFetchPreset,
-  llm_judge: llmJudgePreset,
-  api_fetch_llm: apiFetchLLMPreset,
+  llm_call: llmCallPreset,
+  agent_loop: agentLoopPreset,
   api_fetch_wait: apiFetchWaitPreset,
-  participant_evidence_llm: participantEvidenceLLMPreset,
+  api_fetch_agent_loop: apiFetchAgentLoopPreset,
+  validate_blueprint_gadget: validateBlueprintGadgetPreset,
 }
 
 export function getResolutionBlueprintPreset(id: ResolutionBlueprintPresetId): ResolutionBlueprintPreset {

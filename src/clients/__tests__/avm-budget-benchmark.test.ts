@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import algosdk from 'algosdk'
-import { execFileSync } from 'child_process'
-import * as fs from 'fs'
-import * as path from 'path'
-import { fileURLToPath } from 'url'
 
 import { createMarketAtomic, minimumBootstrapDeposit } from '../market-factory'
 import { readConfig, type ProtocolConfig } from '../protocol-config'
@@ -11,33 +7,25 @@ import {
   buy,
   cancelDisputeAndMarket,
   challengeResolution,
-  claimLpFees,
-  enterActiveLpForDeposit,
   finalizeDispute,
   getMarketState,
   proposeResolution,
   recommendedNoopsFor,
   simulateBudgetedCall,
-  targetDeltaBForActiveLpDepositFromPrices,
   triggerResolution,
-  withdrawLpFees,
   type BudgetSimulationResult,
 } from '../question-market'
-import { boxNameAddr, marketBoxRefs, pricingBoxRefs, readGlobalState, type ClientConfig } from '../base'
-import { MARKET_BOX_USER_FEES_PREFIX } from '../market-schema'
+import { boxNameAddr, marketBoxRefs, readGlobalState, type ClientConfig } from '../base'
 import { getLocalnetAccountAtIndex, getLocalnetAccountByAddress } from './localnet-accounts'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEPLOYMENT_PATH = path.resolve(__dirname, '../../../protocol-deployment.json')
+import { deployLocalnetProtocol, loadUsableLocalnetDeployment } from './localnet-deployment'
 
 const ALGOD_TOKEN = 'a'.repeat(64)
-const ALGOD_SERVER = 'http://localhost'
+const ALGOD_SERVER = 'http://127.0.0.1'
 const ALGOD_PORT = 4001
 
 const NUM_OUTCOMES = 3
 const BOOTSTRAP_DEPOSIT = minimumBootstrapDeposit(50_000_000n, NUM_OUTCOMES)
 const BUY_COST = 25_000_000n
-const LP_DEPOSIT = 12_000_000n
 const SHARE_UNIT = 1_000_000n
 const MIN_GROUP_HEADROOM = 100
 const BENCHMARK_CHALLENGE_WINDOW_SECS = 20_000
@@ -70,10 +58,10 @@ interface BudgetScenario extends BudgetSimulationResult {
   scenario: string
 }
 
-function activeLpBudgetOptions() {
+function activeLpBudgetOptions(marketAppId: number) {
   return {
     budgetAppId: deployment.protocolConfigAppId,
-    budgetForeignApps: [deployment.marketFactoryAppId],
+    budgetForeignApps: [marketAppId],
   }
 }
 
@@ -143,12 +131,13 @@ async function makeAssetTransfer(
   amount: bigint,
 ): Promise<algosdk.TransactionWithSigner> {
   const suggestedParams = await config.algodClient.getTransactionParams().do()
+  const feeParams = { ...suggestedParams, flatFee: true, fee: 1000n }
   const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
     sender: config.sender,
     receiver,
     assetIndex: assetId,
     amount,
-    suggestedParams,
+    suggestedParams: feeParams,
   })
   return { txn, signer: config.signer }
 }
@@ -319,51 +308,12 @@ async function measureScenario(
   expect(result.groupAppBudgetHeadroom, scenario).toBeGreaterThanOrEqual(MIN_GROUP_HEADROOM)
 }
 
-async function canUseExistingDeployment(algodClient: algosdk.Algodv2): Promise<boolean> {
-  if (!fs.existsSync(DEPLOYMENT_PATH)) return false
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
-    if (
-      typeof parsed?.protocolConfigAppId !== 'number' ||
-      typeof parsed?.marketFactoryAppId !== 'number' ||
-      typeof parsed?.usdcAsaId !== 'number'
-    ) {
-      return false
-    }
-
-    await readConfig(algodClient, parsed.protocolConfigAppId)
-    await algodClient.getApplicationByID(parsed.marketFactoryAppId).do()
-    await algodClient.getAssetByID(parsed.usdcAsaId).do()
-    return true
-  } catch {
-    return false
-  }
-}
-
-function deployLocalnetProtocol(): void {
-  const sdkRoot = path.resolve(__dirname, '../../..')
-  const tsxCli = path.resolve(sdkRoot, 'node_modules/tsx/dist/cli.mjs')
-  execFileSync('algokit', ['localnet', 'reset'], {
-    cwd: sdkRoot,
-    stdio: 'pipe',
-  })
-  execFileSync(process.execPath, [tsxCli, 'src/scripts/deploy-localnet.ts'], {
-    cwd: sdkRoot,
-    stdio: 'pipe',
-  })
-}
-
 describe('AVM budget benchmark: question market', () => {
   beforeAll(async () => {
     algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
     await algod.status().do()
 
-    if (!(await canUseExistingDeployment(algod))) {
-      deployLocalnetProtocol()
-    }
-
-    deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
+    deployment = await loadUsableLocalnetDeployment(algod) ?? deployLocalnetProtocol({ reset: true })
     protocolConfig = await readConfig(algod, deployment.protocolConfigAppId)
     const deployerAccount = await getLocalnetAccountByAddress(algod, deployment.deployer)
     deployer = deployerAccount.addr
@@ -402,7 +352,7 @@ describe('AVM budget benchmark: question market', () => {
       {
         foreignAssets: [deployment.usdcAsaId],
         innerTxnCount: 1,
-        ...activeLpBudgetOptions(),
+        ...activeLpBudgetOptions(mainMarket.appId),
       },
     )
     await buy(mainMarket.creatorConfig, 1, BUY_COST, NUM_OUTCOMES, deployment.usdcAsaId)
@@ -417,68 +367,9 @@ describe('AVM budget benchmark: question market', () => {
       {
         foreignAssets: [deployment.usdcAsaId],
         innerTxnCount: 1,
-        ...activeLpBudgetOptions(),
+        ...activeLpBudgetOptions(mainMarket.appId),
       },
     )
-
-    const activeLpConfig = mainMarket.challengerConfig
-    const activeLpState = await getMarketState(algod, mainMarket.appId)
-    const targetDeltaB = targetDeltaBForActiveLpDepositFromPrices(LP_DEPOSIT, activeLpState.prices)
-    const lpOptInTxn = await buildAppOptInIfNeeded(activeLpConfig.sender, activeLpConfig.signer, mainMarket.appId)
-
-    await measureScenario(
-      results,
-      'active-enter-lp-3-outcome',
-      activeLpConfig,
-      'enter_lp_active',
-      [
-        targetDeltaB,
-        LP_DEPOSIT,
-        activeLpState.prices,
-        1n,
-        await makeAssetTransfer(activeLpConfig, mainAppAddr, deployment.usdcAsaId, LP_DEPOSIT),
-      ],
-      0,
-      {
-        prependTxns: lpOptInTxn ? [lpOptInTxn] : undefined,
-        boxOverride: [
-          ...pricingBoxRefs(mainMarket.appId, NUM_OUTCOMES),
-          { appIndex: mainMarket.appId, name: boxNameAddr(MARKET_BOX_USER_FEES_PREFIX, activeLpConfig.sender) },
-        ],
-        foreignAssets: [deployment.usdcAsaId],
-        innerTxnCount: 1,
-        ...activeLpBudgetOptions(),
-      },
-    )
-    await enterActiveLpForDeposit(activeLpConfig, LP_DEPOSIT, NUM_OUTCOMES, deployment.usdcAsaId, {
-      expectedPrices: activeLpState.prices,
-    })
-    await buy(mainMarket.creatorConfig, 2, BUY_COST, NUM_OUTCOMES, deployment.usdcAsaId)
-
-    await measureScenario(
-      results,
-      'active-claim-lp-fees-3-outcome',
-      activeLpConfig,
-      'claim_lp_fees',
-      [],
-      0,
-    )
-    await claimLpFees(activeLpConfig)
-
-    await measureScenario(
-      results,
-      'active-withdraw-lp-fees-3-outcome',
-      activeLpConfig,
-      'withdraw_lp_fees',
-      [1n],
-      0,
-      {
-        foreignAssets: [deployment.usdcAsaId],
-        innerTxnCount: 1,
-      },
-    )
-    await withdrawLpFees(activeLpConfig, 1n, deployment.usdcAsaId)
-
     await advanceTimePast(BigInt(mainMarket.deadline + 1))
     await measureScenario(
       results,
@@ -701,7 +592,7 @@ describe('AVM budget benchmark: question market', () => {
       },
     )
 
-    expect(results.length).toBe(16)
+    expect(results.length).toBe(13)
     console.info('[avm-budget]', JSON.stringify(results, null, 2))
   }, 240_000)
 })

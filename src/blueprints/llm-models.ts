@@ -1,3 +1,4 @@
+import { LLM_PROVIDERS } from './types.js'
 import type { LLMProvider } from './types.js'
 
 export interface LLMModelOption {
@@ -47,8 +48,6 @@ export const LLM_MODEL_OPTIONS: readonly LLMModelOption[] = [
     label: 'Gemini 3.1 Flash-Lite Preview',
   },
 ]
-
-const LLM_PROVIDERS: readonly LLMProvider[] = ['anthropic', 'openai', 'google']
 
 export function isLLMProvider(value: string | null | undefined): value is LLMProvider {
   return !!value && LLM_PROVIDERS.includes(value as LLMProvider)

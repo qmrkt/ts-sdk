@@ -1,7 +1,7 @@
 import algosdk from 'algosdk'
 
 const KMD_TOKEN = 'a'.repeat(64)
-const KMD_SERVER = 'http://localhost'
+const KMD_SERVER = 'http://127.0.0.1'
 const KMD_PORT = 4002
 
 export type LocalnetAccount = {

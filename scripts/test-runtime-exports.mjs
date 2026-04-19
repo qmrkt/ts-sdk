@@ -19,6 +19,10 @@ const runtimeChecks = [
     specifier: '@questionmarket/sdk/clients/protocol-config',
     requiredExports: ['readConfig'],
   },
+  {
+    specifier: '@questionmarket/sdk/indexer',
+    requiredExports: ['IndexerClient'],
+  },
 ]
 
 for (const check of runtimeChecks) {

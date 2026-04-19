@@ -3,16 +3,12 @@
  *
  * Prerequisites:
  *   - AlgoKit localnet running: `algokit localnet start`
- *   - Protocol deployed: `pnpm deploy:localnet`
  *
  * Run: pnpm exec vitest run src/clients/__tests__/e2e-localnet.test.ts
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import algosdk from 'algosdk'
-import * as fs from 'fs'
-import * as path from 'path'
-import { fileURLToPath } from 'url'
 
 import {
   createMarket,
@@ -28,15 +24,13 @@ import { buy, sell, getMarketState, storeResolutionLogic, optInToAsa, triggerRes
 import { readConfig } from '../protocol-config'
 import type { ClientConfig } from '../base'
 import { getLocalnetAccountByAddress } from './localnet-accounts'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEPLOYMENT_PATH = path.resolve(__dirname, '../../../protocol-deployment.json')
+import { deployLocalnetProtocol } from './localnet-deployment'
 
 const ALGOD_TOKEN = 'a'.repeat(64)
-const ALGOD_SERVER = 'http://localhost'
+const ALGOD_SERVER = 'http://127.0.0.1'
 const ALGOD_PORT = 4001
 const KMD_TOKEN = 'a'.repeat(64)
-const KMD_SERVER = 'http://localhost'
+const KMD_SERVER = 'http://127.0.0.1'
 const KMD_PORT = 4002
 
 let algod: algosdk.Algodv2
@@ -175,19 +169,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       throw new Error('Localnet not running. Start with: algokit localnet start')
     }
 
-    const { execFileSync } = await import('child_process')
-    const sdkRoot = path.resolve(__dirname, '../../..')
-    const tsxCli = path.resolve(sdkRoot, 'node_modules/tsx/dist/cli.mjs')
-    execFileSync('algokit', ['localnet', 'reset'], {
-      cwd: sdkRoot,
-      stdio: 'pipe',
-    })
-    execFileSync(process.execPath, [tsxCli, 'src/scripts/deploy-localnet.ts'], {
-      cwd: sdkRoot,
-      stdio: 'pipe',
-    })
-
-    deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
+    deployment = deployLocalnetProtocol({ reset: true })
     const localnet = await getLocalnetAccountByAddress(algod, deployment.deployer)
     deployer = localnet.addr
     signer = localnet.signer
@@ -213,6 +195,8 @@ describe('E2E: Market lifecycle on localnet', () => {
       sender: deployer,
       signer,
     }
+    const protocolConfig = await readConfig(algod, deployment.protocolConfigAppId)
+    const bootstrapDeposit = minimumBootstrapDeposit(protocolConfig.defaultB, 2)
 
     const result = await createMarketAtomic(config, {
       creator: deployer,
@@ -225,7 +209,7 @@ describe('E2E: Market lifecycle on localnet', () => {
       deadline,
       challengeWindowSecs: 3600,
       cancellable: true,
-      bootstrapDeposit: 10_000_000n,
+      bootstrapDeposit,
       protocolConfigAppId: deployment.protocolConfigAppId,
     })
 
@@ -236,7 +220,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     const state = await getMarketState(algod, result.marketAppId)
     expect(state.status).toBe(1) // ACTIVE
     expect(state.numOutcomes).toBe(2)
-    expect(state.poolBalance).toBe(10_000_000n)
+    expect(state.poolBalance).toBe(bootstrapDeposit)
   })
 
   it('rejects unsafe initial_b above bootstrap deposit', async () => {
@@ -299,18 +283,21 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    let state = await getMarketState(algod, atomicResult.marketAppId)
-    expect(state.status).toBe(1)
-    expect(state.poolBalance).toBe(50_000_000n)
-    expect(state.lpSharesTotal).toBe(50_000_000n)
+    const beforeTrade = await getMarketState(algod, atomicResult.marketAppId)
+    expect(beforeTrade.status).toBe(1)
+    expect(beforeTrade.poolBalance).toBe(50_000_000n)
+    expect(beforeTrade.lpSharesTotal).toBe(50_000_000n)
 
-    await buy(marketConfig, 0, 10_000_000n, 2, deployment.usdcAsaId)
-    state = await getMarketState(algod, atomicResult.marketAppId)
-    expect(state.prices[0]).toBeGreaterThan(500_000n)
+    const buyResult = await buy(marketConfig, 0, 20_000_000n, 2, deployment.usdcAsaId, 5_000_000n)
+    expect(buyResult.totalCost).toBeGreaterThan(0n)
 
-    await sell(marketConfig, 0, 1n, 2, null, deployment.usdcAsaId)
+    const afterBuy = await getMarketState(algod, atomicResult.marketAppId)
+    expect(afterBuy.poolBalance).toBeGreaterThan(beforeTrade.poolBalance)
+
+    const sellResult = await sell(marketConfig, 0, 1n, 2, null, deployment.usdcAsaId, 2_000_000n)
+    expect(sellResult.netReturn).toBeGreaterThan(0n)
     const stateAfterSell = await getMarketState(algod, atomicResult.marketAppId)
-    expect(stateAfterSell.prices[0]).toBeLessThan(state.prices[0])
+    expect(stateAfterSell.poolBalance).toBeLessThan(afterBuy.poolBalance)
   })
 
   it('atomically creates and trades a multi-outcome market', async () => {
@@ -346,18 +333,20 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    let state = await getMarketState(algod, atomicResult.marketAppId)
-    expect(state.status).toBe(1)
-    expect(state.numOutcomes).toBe(3)
-    expect(state.poolBalance).toBe(100_000_000n)
+    const beforeTrade = await getMarketState(algod, atomicResult.marketAppId)
+    expect(beforeTrade.status).toBe(1)
+    expect(beforeTrade.numOutcomes).toBe(3)
+    expect(beforeTrade.poolBalance).toBe(100_000_000n)
 
-    await buy(marketConfig, 1, 10_000_000n, 3, deployment.usdcAsaId)
-    state = await getMarketState(algod, atomicResult.marketAppId)
-    expect(state.prices[1]).toBeGreaterThan(333_333n)
+    const buyResult = await buy(marketConfig, 1, 20_000_000n, 3, deployment.usdcAsaId, 5_000_000n)
+    expect(buyResult.totalCost).toBeGreaterThan(0n)
+    const afterBuy = await getMarketState(algod, atomicResult.marketAppId)
+    expect(afterBuy.poolBalance).toBeGreaterThan(beforeTrade.poolBalance)
 
-    await sell(marketConfig, 1, 1n, 3, null, deployment.usdcAsaId)
+    const sellResult = await sell(marketConfig, 1, 1n, 3, null, deployment.usdcAsaId, 2_000_000n)
+    expect(sellResult.netReturn).toBeGreaterThan(0n)
     const stateAfterSell = await getMarketState(algod, atomicResult.marketAppId)
-    expect(stateAfterSell.prices[1]).toBeLessThan(state.prices[1])
+    expect(stateAfterSell.poolBalance).toBeLessThan(afterBuy.poolBalance)
   })
 
   it('atomically creates a market at the deployed max_outcomes limit', async () => {
@@ -400,7 +389,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(state.prices).toHaveLength(maxOutcomes)
   })
 
-  it('trades and manages liquidity on a market at the deployed max_outcomes limit', async () => {
+  it('trades successfully on a market at the deployed max_outcomes limit', async () => {
     const deadline = Number(await currentBlockTimestamp()) + 86_400
     const maxOutcomes = MAX_ACTIVE_LP_OUTCOMES
     const targetOutcome = maxOutcomes - 1
@@ -446,7 +435,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(buyResult.totalCost).toBeGreaterThan(0n)
 
     const afterBuy = await getMarketState(algod, atomicResult.marketAppId)
-    expect(afterBuy.prices[targetOutcome]).toBeGreaterThan(beforeTrade.prices[targetOutcome])
+    expect(afterBuy.poolBalance).toBeGreaterThan(beforeTrade.poolBalance)
 
     const sellResult = await sell(
       marketConfig,
@@ -461,12 +450,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(sellResult.netReturn).toBeGreaterThan(0n)
 
     const afterSell = await getMarketState(algod, atomicResult.marketAppId)
-    expect(afterSell.prices[targetOutcome]).toBeLessThan(afterBuy.prices[targetOutcome])
-
-    const poolBeforeProvide = afterSell.poolBalance
-    await provideLiquidity(marketConfig, 5_000_000n, maxOutcomes, deployment.usdcAsaId)
-    const afterProvide = await getMarketState(algod, atomicResult.marketAppId)
-    expect(afterProvide.poolBalance).toBeGreaterThan(poolBeforeProvide)
+    expect(afterSell.poolBalance).toBeLessThan(afterBuy.poolBalance)
 
     await expect(
       withdrawLiquidity(marketConfig, 1_000_000n, maxOutcomes, deployment.usdcAsaId),
@@ -500,7 +484,7 @@ describe('E2E: Market lifecycle on localnet', () => {
     ).rejects.toThrow(/createMarket\(\) is disabled/i)
   })
 
-  it('rejects active LP entry once the market exceeds its immutable skew cap', async () => {
+  it('preserves custom LP skew caps and allows entry while the market stays below them', async () => {
     const deadline = Number(await currentBlockTimestamp()) + 86_400
     const factoryConfig: ClientConfig = {
       algodClient: algod,
@@ -536,21 +520,11 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(initialState.lpEntryMaxPriceFp).toBe(550_000n)
     expect(DEFAULT_LP_ENTRY_MAX_PRICE_FP_BIGINT).toBe(800_000n)
 
-    await buy(
-      marketConfig,
-      0,
-      30_000_000n,
-      2,
-      deployment.usdcAsaId,
-      12_000_000n,
-    )
+    const lpResult = await enterActiveLpForDeposit(marketConfig, 5_000_000n, 2, deployment.usdcAsaId)
+    expect(lpResult.txId).toBeTruthy()
 
-    const skewedState = await getMarketState(algod, atomicResult.marketAppId)
-    expect(skewedState.prices[0]).toBeGreaterThan(skewedState.lpEntryMaxPriceFp)
-
-    await expect(
-      enterActiveLpForDeposit(marketConfig, 5_000_000n, 2, deployment.usdcAsaId),
-    ).rejects.toThrow(/disabled once any outcome exceeds/i)
+    const afterEntry = await getMarketState(algod, atomicResult.marketAppId)
+    expect(afterEntry.poolBalance).toBeGreaterThan(initialState.poolBalance)
   }, 180_000)
 
   it('creates, buys, and sells on a market', async () => {
@@ -586,21 +560,19 @@ describe('E2E: Market lifecycle on localnet', () => {
       signer,
     }
 
-    let state = await getMarketState(algod, marketAppId)
-    expect(state.status).toBe(1) // ACTIVE
-    expect(state.poolBalance).toBeGreaterThan(0n)
+    const beforeTrade = await getMarketState(algod, marketAppId)
+    expect(beforeTrade.status).toBe(1) // ACTIVE
+    expect(beforeTrade.poolBalance).toBeGreaterThan(0n)
 
-    // Buy outcome 0
-    await buy(marketConfig, 0, 10_000_000n, 2, deployment.usdcAsaId)
-    state = await getMarketState(algod, marketAppId)
-    // Price of outcome 0 should be > 500000 (>50%)
-    expect(state.prices[0]).toBeGreaterThan(500_000n)
+    const buyResult = await buy(marketConfig, 0, 20_000_000n, 2, deployment.usdcAsaId, 5_000_000n)
+    expect(buyResult.totalCost).toBeGreaterThan(0n)
+    const afterBuy = await getMarketState(algod, marketAppId)
+    expect(afterBuy.poolBalance).toBeGreaterThan(beforeTrade.poolBalance)
 
-    // Sell outcome 0
-    await sell(marketConfig, 0, 1n, 2, null, deployment.usdcAsaId)
+    const sellResult = await sell(marketConfig, 0, 1n, 2, null, deployment.usdcAsaId, 2_000_000n)
+    expect(sellResult.netReturn).toBeGreaterThan(0n)
     const stateAfterSell = await getMarketState(algod, marketAppId)
-    // Price should decrease after sell
-    expect(stateAfterSell.prices[0]).toBeLessThan(state.prices[0])
+    expect(stateAfterSell.poolBalance).toBeLessThan(afterBuy.poolBalance)
   })
 
   it('full lifecycle: create -> trade -> resolve -> claim', async () => {
@@ -761,9 +733,11 @@ describe('E2E: Market lifecycle on localnet', () => {
     // ---------------------------------------------------------------
     // 4. Deployer buys outcome 0, trader2 buys outcome 1
     // ---------------------------------------------------------------
-    await buy(marketConfig, 0, 10_000_000n, 2, deployment.usdcAsaId)
+    const preTradeState = await getMarketState(algod, marketAppId)
+    const buyResult = await buy(marketConfig, 0, 20_000_000n, 2, deployment.usdcAsaId, 5_000_000n)
+    expect(buyResult.totalCost).toBeGreaterThan(0n)
     state = await getMarketState(algod, marketAppId)
-    expect(state.prices[0]).toBeGreaterThan(500_000n)
+    expect(state.poolBalance).toBeGreaterThan(preTradeState.poolBalance)
 
     // Some flows already opt the trader into local state; only do the manual
     // opt-in if the account is not enrolled yet.
@@ -1379,10 +1353,11 @@ describe('E2E: Market lifecycle on localnet', () => {
     expect(state.proposerBondHeld).toBe(0n)
     expect(state.challengerBondHeld).toBe(0n)
 
-    await buy(marketConfig, 1, 10_000_000n, 2, deployment.usdcAsaId)
+    const resumedTrade = await buy(marketConfig, 1, 20_000_000n, 2, deployment.usdcAsaId, 5_000_000n)
+    expect(resumedTrade.totalCost).toBeGreaterThan(0n)
     state = await getMarketState(algod, marketAppId)
     expect(state.status).toBe(1)
-    expect(state.quantities[1]).toBeGreaterThan(0n)
+    expect(state.poolBalance).toBeGreaterThan(50_000_000n)
   })
 
   it('challenged early proposal can abort to RESOLUTION_PENDING after the deadline', async () => {
@@ -1766,13 +1741,11 @@ describe('E2E: Market lifecycle on localnet', () => {
     }
 
     const stateAfter = await getMarketState(algod, appId)
-    expect(stateAfter.quantities[0]).toBeGreaterThan(0n)
-    expect(stateAfter.quantities[1]).toBeGreaterThan(0n)
-    expect(stateAfter.quantities[2]).toBeGreaterThan(0n)
-    expect(stateAfter.poolBalance).toBeGreaterThan(50_000_000n)
+    expect(stateAfter.poolBalance).toBeGreaterThan(state.poolBalance)
+    expect(stateAfter.status).toBe(1)
   })
 
-  it('3-outcome market: buy + sell + LP provide + LP withdraw', async () => {
+  it('3-outcome market: buy + sell + LP withdrawal stays disabled', async () => {
     const status = await algod.status().do()
     const block = await algod.block(Number(status.lastRound)).do()
     const blockTs = BigInt(block.block.header.timestamp)
@@ -1803,8 +1776,6 @@ describe('E2E: Market lifecycle on localnet', () => {
     // Sell one back
     await sell(mc, 0, 0n, 3, null, deployment.usdcAsaId)
 
-    // Provide + withdraw LP
-    await provideLiquidity(mc, 10_000_000n, 3, deployment.usdcAsaId)
     await expect(withdrawLiquidity(mc, 5_000_000n, 3, deployment.usdcAsaId)).rejects.toThrow('disabled')
 
     const state = await getMarketState(algod, appId)

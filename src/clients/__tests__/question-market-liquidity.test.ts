@@ -19,6 +19,12 @@ const baseMocks = vi.hoisted(() => ({
 }))
 
 const internalMocks = vi.hoisted(() => ({
+  AtomicGroupUnsupportedError: class AtomicGroupUnsupportedError extends Error {
+    constructor(message: string) {
+      super(message)
+      this.name = 'AtomicGroupUnsupportedError'
+    }
+  },
   assertActiveLpSkewWithinCap: vi.fn(),
   buildAppOptInIfNeeded: vi.fn(),
   buildAsaOptInIfNeeded: vi.fn(),
@@ -45,6 +51,7 @@ vi.mock('../base.js', async () => {
 })
 
 vi.mock('../question-market/internal.js', () => ({
+  AtomicGroupUnsupportedError: internalMocks.AtomicGroupUnsupportedError,
   assertActiveLpSkewWithinCap: internalMocks.assertActiveLpSkewWithinCap,
   buildAppOptInIfNeeded: internalMocks.buildAppOptInIfNeeded,
   buildAsaOptInIfNeeded: internalMocks.buildAsaOptInIfNeeded,
@@ -150,6 +157,49 @@ describe('question-market liquidity wrappers', () => {
 
     await expect(enterActiveLpForDeposit(config, 1n, 2, 31566704)).rejects.toThrow(
       /too small to add any active LP depth/i,
+    )
+  })
+
+  it('retries with a smaller target delta when LP entry simulations exceed max_deposit', async () => {
+    const config = makeConfig()
+    const state = {
+      prices: [600_000n, 400_000n],
+      lpEntryMaxPriceFp: 800_000n,
+    }
+    internalMocks.getMarketState.mockResolvedValue(state)
+    internalMocks.targetDeltaBForActiveLpDepositFromPrices.mockReturnValue(100n)
+    internalMocks.buildAsaOptInIfNeeded.mockResolvedValue(undefined)
+    internalMocks.buildAppOptInIfNeeded.mockResolvedValue(undefined)
+    internalMocks.makeAssetTransfer.mockReturnValue({ kind: 'deposit' })
+    internalMocks.callWithBudget
+      .mockRejectedValueOnce(new internalMocks.AtomicGroupUnsupportedError('max_deposit too small'))
+      .mockResolvedValueOnce({ txId: 'retry-success' })
+
+    await expect(enterActiveLpForDeposit(config, 500n, 2, 31566704)).resolves.toEqual({
+      txId: 'retry-success',
+      targetDeltaB: 95n,
+      maxDeposit: 500n,
+    })
+
+    expect(internalMocks.callWithBudget).toHaveBeenNthCalledWith(
+      1,
+      config,
+      'enter_lp_active',
+      [100n, 500n, state.prices, 1n, { txn: { kind: 'deposit' }, signer: config.signer }],
+      2,
+      0,
+      14,
+      expect.any(Object),
+    )
+    expect(internalMocks.callWithBudget).toHaveBeenNthCalledWith(
+      2,
+      config,
+      'enter_lp_active',
+      [95n, 500n, state.prices, 1n, { txn: { kind: 'deposit' }, signer: config.signer }],
+      2,
+      0,
+      14,
+      expect.any(Object),
     )
   })
 

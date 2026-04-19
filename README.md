@@ -29,8 +29,8 @@ npm install @questionmarket/sdk
 
 - `compiler` -- template token replacement, validation, canonical JSON serialization
 - `validate` -- DAG structure checks, node type validation, edge consistency
-- `presets` -- built-in blueprint templates (API fetch, LLM judge, participant evidence, etc.)
-- `types` -- full type definitions for blueprints, nodes, edges, trust classes
+- `presets` -- built-in engine-native templates (`api_fetch`, `llm_call`, `agent_loop`, `await_signal`, etc.)
+- `types` -- full type definitions for blueprints, nodes, edges, trust classes, and child blueprint policies
 
 ## Examples
 
@@ -85,7 +85,7 @@ const blueprint: ResolutionBlueprint = {
   nodes: [
     {
       id: 'judge',
-      type: 'llm_judge',
+      type: 'llm_call',
       label: 'Evaluate evidence',
       config: {
         provider: 'anthropic',
@@ -94,20 +94,26 @@ const blueprint: ResolutionBlueprint = {
           'Question: {{market.question}}\n' +
           'Outcomes: {{market.outcomes.indexed}}\n\n' +
           'Evaluate available evidence and return the correct outcome index.',
-        require_citations: false,
+        allowed_outcomes_key: 'inputs.market.outcomes_json',
         timeout_seconds: 60,
       },
       position: { x: 0, y: 0 },
     },
     {
-      id: 'submit',
-      type: 'submit_result',
-      label: 'Submit',
-      config: { outcome_key: 'judge.outcome' },
+      id: 'success',
+      type: 'return',
+      label: 'Return success',
+      config: {
+        value: {
+          status: 'success',
+          outcome: '{{results.judge.outcome}}',
+          reasoning: '{{results.judge.reasoning}}',
+        },
+      },
       position: { x: 200, y: 0 },
     },
   ],
-  edges: [{ from: 'judge', to: 'submit' }],
+  edges: [{ from: 'judge', to: 'success' }],
 }
 
 const compiled = compileResolutionBlueprint(blueprint, {

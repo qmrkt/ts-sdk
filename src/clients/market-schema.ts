@@ -191,8 +191,10 @@ export function deriveResolutionClassFromBlueprint(blueprint: unknown): number {
     : undefined) ?? []
 
   if (!Array.isArray(nodes)) return RESOLUTION_CLASS_SOURCE_BASED
-  if (nodes.some((node) => node?.type === 'human_judge')) return RESOLUTION_CLASS_HUMAN_JUDGED
-  if (nodes.some((node) => node?.type === 'llm_judge')) return RESOLUTION_CLASS_AGENT_ASSISTED
+  if (nodes.some((node) => node?.type === 'await_signal')) return RESOLUTION_CLASS_HUMAN_JUDGED
+  if (nodes.some((node) => node?.type === 'agent_loop' || node?.type === 'llm_call')) {
+    return RESOLUTION_CLASS_AGENT_ASSISTED
+  }
   return RESOLUTION_CLASS_SOURCE_BASED
 }
 

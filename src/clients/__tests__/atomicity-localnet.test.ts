@@ -1,8 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import algosdk from 'algosdk'
-import * as fs from 'fs'
-import * as path from 'path'
-import { fileURLToPath } from 'url'
 
 import { createMarketAtomic, type CreateMarketAtomicParams } from '../market-factory'
 import {
@@ -24,13 +21,10 @@ import {
 import { boxNameAddr, boxNameAddrIdx, readBox, type ClientConfig } from '../base'
 import { MARKET_BOX_USER_SHARES_PREFIX } from '../market-schema'
 import { getLocalnetAccountByAddress, loadLocalnetWalletAccounts } from './localnet-accounts'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEPLOYMENT_PATH = path.resolve(__dirname, '../../../protocol-deployment.json')
-const TSX_CLI = path.resolve(__dirname, '../../../node_modules/tsx/dist/cli.mjs')
+import { deployLocalnetProtocol } from './localnet-deployment'
 
 const ALGOD_TOKEN = 'a'.repeat(64)
-const ALGOD_SERVER = 'http://localhost'
+const ALGOD_SERVER = 'http://127.0.0.1'
 const ALGOD_PORT = 4001
 
 const STARTING_USDC = 100_000_000n
@@ -228,7 +222,7 @@ async function createFundedUser(
   }
 
   const user = { addr: account.addr, signer: account.signer }
-  await fundAlgo(user.addr, 10_000_000)
+  await fundAlgo(user.addr, 25_000_000)
   await ensureAsaOptIn(user.addr, user.signer, deployment.usdcAsaId)
   if (usdcAmount > 0n) {
     await sendAsset(deployer, signer, user.addr, deployment.usdcAsaId, usdcAmount)
@@ -309,17 +303,7 @@ describe('E2E: Atomic flow regressions on localnet', () => {
       throw new Error('Localnet not running. Start with: algokit localnet start')
     }
 
-    const { execFileSync } = await import('child_process')
-    execFileSync('algokit', ['localnet', 'reset'], {
-      cwd: path.resolve(__dirname, '../../..'),
-      stdio: 'pipe',
-    })
-    execFileSync(process.execPath, [TSX_CLI, 'src/scripts/deploy-localnet.ts'], {
-      cwd: path.resolve(__dirname, '../../..'),
-      stdio: 'pipe',
-    })
-
-    deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
+    deployment = deployLocalnetProtocol({ reset: true })
     const deployerAccount = await getLocalnetAccountByAddress(algod, deployment.deployer)
     deployer = deployerAccount.addr
     signer = deployerAccount.signer

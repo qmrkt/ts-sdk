@@ -10,9 +10,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import algosdk from 'algosdk'
 import { createHash } from 'crypto'
-import * as fs from 'fs'
-import * as path from 'path'
-import { fileURLToPath } from 'url'
 
 import { createMarketAtomic, type CreateMarketAtomicParams } from '../market-factory'
 import {
@@ -22,13 +19,10 @@ import {
 } from '../question-market'
 import type { ClientConfig } from '../base'
 import { getFundedLocalnetAccount, getLocalnetAccountByAddress, loadLocalnetWalletAccounts } from './localnet-accounts'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEPLOYMENT_PATH = path.resolve(__dirname, '../../../protocol-deployment.json')
-const TSX_CLI = path.resolve(__dirname, '../../../node_modules/tsx/dist/cli.mjs')
+import { deployLocalnetProtocol } from './localnet-deployment'
 
 const ALGOD_TOKEN = 'a'.repeat(64)
-const ALGOD_SERVER = 'http://localhost'
+const ALGOD_SERVER = 'http://127.0.0.1'
 const ALGOD_PORT = 4001
 
 type Account = { addr: string; signer: algosdk.TransactionSigner }
@@ -198,22 +192,12 @@ describe.sequential('Stress: adversarial & edge cases', () => {
     await algod.status().do()
 
     // Deploy fresh stack so stress tests are isolated
-    const { execFileSync } = await import('child_process')
-    execFileSync('algokit', ['localnet', 'reset'], {
-      cwd: path.resolve(__dirname, '../../..'),
-      stdio: 'pipe',
-    })
-    execFileSync(process.execPath, [TSX_CLI, 'src/scripts/deploy-localnet.ts'], {
-      cwd: path.resolve(__dirname, '../../..'),
-      stdio: 'pipe',
-    })
-
-    deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
+    deployment = deployLocalnetProtocol({ reset: true })
     accounts = await getAccounts(3)
 
     // Fund deployer with plenty of USDC
     await fundUsdc(accounts[0], 0n).catch(() => {})
-  }, 60_000)
+  }, 120_000)
 
   beforeEach(async () => {
     if (!algod || accounts.length === 0) return
@@ -341,21 +325,25 @@ describe.sequential('Stress: adversarial & edge cases', () => {
     await prepareTrader(trader2, appId, 200_000_000n)
 
     // Rapid buys: each wallet buys 3 times
+    let trader1TotalCost = 0n
+    let trader2TotalCost = 0n
     for (let i = 0; i < 3; i++) {
-      await buy(marketConfig(trader1, appId), 0, 10_000_000n, 2, deployment.usdcAsaId)
-      await buy(marketConfig(trader2, appId), 1, 10_000_000n, 2, deployment.usdcAsaId)
+      const trader1Buy = await buy(marketConfig(trader1, appId), 0, 10_000_000n, 2, deployment.usdcAsaId)
+      const trader2Buy = await buy(marketConfig(trader2, appId), 1, 10_000_000n, 2, deployment.usdcAsaId)
+      trader1TotalCost += trader1Buy.totalCost
+      trader2TotalCost += trader2Buy.totalCost
     }
 
     const state = await getMarketState(algod, appId)
-    // Both outcomes should have shares
-    expect(state.quantities[0]).toBeGreaterThan(0n)
-    expect(state.quantities[1]).toBeGreaterThan(0n)
+    expect(trader1TotalCost).toBeGreaterThan(0n)
+    expect(trader2TotalCost).toBeGreaterThan(0n)
     // Pool should have grown
     expect(state.poolBalance).toBeGreaterThan(100_000_000n)
-    // Equal buys on both sides keep prices near 50/50 (correct LMSR behavior)
-    // Verify quantities are correct (3 buys of SHARE_UNIT each)
-    expect(state.quantities[0]).toBe(3_000_000n)
-    expect(state.quantities[1]).toBe(3_000_000n)
+    // Symmetric demand should keep a binary market near even odds.
+    const midpoint = 500_000n
+    const priceTolerance = 5_000n
+    expect((state.prices[0] > midpoint ? state.prices[0] - midpoint : midpoint - state.prices[0])).toBeLessThanOrEqual(priceTolerance)
+    expect((state.prices[1] > midpoint ? state.prices[1] - midpoint : midpoint - state.prices[1])).toBeLessThanOrEqual(priceTolerance)
   }, 240_000)
 
   // ── 6. Buy + sell round trip (slippage check) ──

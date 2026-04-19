@@ -15,19 +15,40 @@ import {
 } from '../question-market'
 import type { ClientConfig } from '../base'
 import { getLocalnetAccountAtIndex, getLocalnetAccountByAddress, type LocalnetAccount } from './localnet-accounts'
+import { deployLocalnetProtocol } from './localnet-deployment'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SDK_ROOT = path.resolve(__dirname, '../../..')
-const REPO_ROOT = path.resolve(SDK_ROOT, '..')
-const DEPLOYMENT_PATH = path.resolve(SDK_ROOT, 'protocol-deployment.json')
-const TSX_CLI = path.resolve(SDK_ROOT, 'node_modules/tsx/dist/cli.mjs')
+const WORKSPACE_ROOT = path.resolve(SDK_ROOT, '..')
+
+function resolveExistingDir(candidates: string[]): string | undefined {
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
+const QUESTION_REPO_ROOT = resolveExistingDir([
+  path.resolve(WORKSPACE_ROOT, 'question'),
+  WORKSPACE_ROOT,
+])
+const INDEXER_ROOT = QUESTION_REPO_ROOT
+  ? resolveExistingDir([path.resolve(QUESTION_REPO_ROOT, 'indexer-go')])
+  : undefined
+const BLUEPRINT_ENGINE_ROOT = resolveExistingDir([
+  path.resolve(WORKSPACE_ROOT, 'question-market-blueprint-engine'),
+  path.resolve(WORKSPACE_ROOT, 'resolution-engine'),
+])
 
 const ALGOD_TOKEN = 'a'.repeat(64)
-const ALGOD_SERVER = 'http://localhost'
+const ALGOD_SERVER = 'http://127.0.0.1'
 const ALGOD_PORT = 4001
-const GO_BIN = process.env.GO_BIN || 'go'
+const GO_BIN = process.env.GO_BIN
+  || (fs.existsSync('/opt/homebrew/bin/go') ? '/opt/homebrew/bin/go' : undefined)
+  || (fs.existsSync('/usr/local/bin/go') ? '/usr/local/bin/go' : undefined)
+  || 'go'
 const TEST_PATH = `/opt/homebrew/bin:${process.env.PATH || ''}`
+const ENABLE_RESOLUTION_SMOKE = process.env.QUESTION_MARKET_ENABLE_SMOKE === '1'
 const INDEXER_WRITE_TOKEN = 'resolution-smoke-write-token'
+const ENGINE_CONTROL_TOKEN = 'resolution-smoke-engine-control-token'
+const ENGINE_CALLBACK_TOKEN = 'resolution-smoke-engine-callback-token'
 
 type ServiceHandle = {
   proc: ChildProcessWithoutNullStreams
@@ -283,32 +304,50 @@ function buildHumanJudgeBlueprint(nodeId: string, title: string): Uint8Array {
       nodes: [
         {
           id: nodeId,
-          type: 'human_judge',
+          type: 'await_signal',
           config: {
-            prompt:
+            reason:
               'Question: {{market.question}}\n' +
               'Outcomes: {{market.outcomes.indexed}}\n\n' +
-              'Return the correct outcome index.',
-            allowed_responders: ['creator'],
+              'Return the correct outcome index with a short reason.',
+            signal_type: 'human_judgment.responded',
             timeout_seconds: 600,
-            require_reason: true,
-            allow_cancel: false,
+            required_payload: ['outcome', 'reason'],
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          config: { outcome_key: `${nodeId}.outcome` },
+          id: 'success',
+          type: 'return',
+          config: {
+            value: {
+              status: 'success',
+              outcome: `{{results.${nodeId}.outcome}}`,
+              reason: `{{results.${nodeId}.reason}}`,
+            },
+          },
         },
         {
-          id: 'cancel',
-          type: 'cancel_market',
-          config: { reason: `${title} failed` },
+          id: 'cancelled',
+          type: 'return',
+          config: {
+            value: {
+              status: 'cancelled',
+              reason: `${title} failed`,
+            },
+          },
         },
       ],
       edges: [
-        { from: nodeId, to: 'submit', condition: `${nodeId}.status == 'responded' && ${nodeId}.outcome != ''` },
-        { from: nodeId, to: 'cancel', condition: `${nodeId}.status == 'timeout'` },
+        {
+          from: nodeId,
+          to: 'success',
+          condition: `results.${nodeId}.status == 'responded' && results.${nodeId}.outcome != ''`,
+        },
+        {
+          from: nodeId,
+          to: 'cancelled',
+          condition: `results.${nodeId}.status == 'timeout' || results.${nodeId}.status == 'cancelled'`,
+        },
       ],
     }),
   )
@@ -328,28 +367,37 @@ function buildEarlyMonitoringBlueprint(): Uint8Array {
       nodes: [
         {
           id: 'term',
-          type: 'outcome_terminality',
+          type: 'cel_eval',
           config: {
-            outcomes: [
-              {
-                index: 0,
-                winner_when: "market.app_id != ''",
-              },
-              {
-                index: 1,
-                eliminated_when: "market.app_id != ''",
-              },
-            ],
+            expressions: {
+              outcome: "inputs.market.app_id != '' ? '0' : ''",
+            },
           },
         },
         {
-          id: 'submit',
-          type: 'submit_result',
-          config: { outcome_key: 'term.winning_outcome' },
+          id: 'success',
+          type: 'return',
+          config: {
+            value: {
+              status: 'success',
+              outcome: '{{results.term.outcome}}',
+            },
+          },
+        },
+        {
+          id: 'deferred',
+          type: 'return',
+          config: {
+            value: {
+              status: 'deferred',
+              reason: 'Monitoring did not reach a terminal result.',
+            },
+          },
         },
       ],
       edges: [
-        { from: 'term', to: 'submit', condition: "term.unique_winner == 'true'" },
+        { from: 'term', to: 'success', condition: "results.term.outcome != ''" },
+        { from: 'term', to: 'deferred', condition: "results.term.outcome == ''" },
       ],
     }),
   )
@@ -363,8 +411,13 @@ function buildDeferResolutionBlueprint(reason: string): Uint8Array {
       nodes: [
         {
           id: 'defer',
-          type: 'defer_resolution',
-          config: { reason },
+          type: 'return',
+          config: {
+            value: {
+              status: 'deferred',
+              reason,
+            },
+          },
         },
       ],
       edges: [],
@@ -548,7 +601,10 @@ async function createSmokeMarket(question: string, options: SmokeMarketOptions =
   return marketAppId
 }
 
-const describeResolutionEngine = hasGoToolchain() ? describe : describe.skip
+const describeResolutionEngine =
+  ENABLE_RESOLUTION_SMOKE && hasGoToolchain() && INDEXER_ROOT && BLUEPRINT_ENGINE_ROOT
+    ? describe
+    : describe.skip
 
 describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
   beforeAll(async () => {
@@ -565,13 +621,7 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
       env: prefixedEnv({}),
     })
 
-    execFileSync(process.execPath, [TSX_CLI, 'src/scripts/deploy-localnet.ts'], {
-      cwd: SDK_ROOT,
-      stdio: 'pipe',
-      env: prefixedEnv({}),
-    })
-
-    deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'))
+    deployment = deployLocalnetProtocol({ reset: false })
     creator = await getLocalnetAccountByAddress(algod, deployment.deployer)
     const walletAccounts = await Promise.all([getLocalnetAccountAtIndex(algod, 0), getLocalnetAccountAtIndex(algod, 1)])
     challenger = walletAccounts.find((account) => account.addr !== creator.addr) ?? await getLocalnetAccountAtIndex(algod, 2)
@@ -580,15 +630,24 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
     await ensureUsdcOptIn(challenger)
     await fundUsdc(challenger.addr, 100_000_000n)
 
+    if (!INDEXER_ROOT) {
+      throw new Error('Missing sibling repo required for smoke test: question/indexer-go')
+    }
+    if (!BLUEPRINT_ENGINE_ROOT) {
+      throw new Error('Missing sibling repo required for smoke test: question-market-blueprint-engine')
+    }
+
     indexerPort = await getFreePort()
     indexerURL = `http://127.0.0.1:${indexerPort}`
+    const enginePort = await getFreePort()
+    const engineURL = `http://127.0.0.1:${enginePort}`
 
     const indexerDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'question-indexer-smoke-'))
     const engineDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'question-engine-smoke-'))
 
     indexerService = spawnService(
       'indexer',
-      path.resolve(REPO_ROOT, 'indexer-go'),
+      INDEXER_ROOT,
       prefixedEnv({
         ALGOD_SERVER,
         ALGOD_PORT: String(ALGOD_PORT),
@@ -597,24 +656,30 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
         PORT: String(indexerPort),
         POLL_INTERVAL: '1000',
         INDEXER_DATA_DIR: indexerDataDir,
-        TRACE_INGEST_TOKEN: INDEXER_WRITE_TOKEN,
+        INDEXER_WRITE_TOKEN,
+        ENGINE_URL: engineURL,
+        ENGINE_CONTROL_TOKEN,
+        ENGINE_CALLBACK_TOKEN,
+        INDEXER_PUBLIC_URL: indexerURL,
+        RESOLUTION_AUTHORITY_MNEMONIC: algosdk.secretKeyToMnemonic(creator.sk),
       }),
     )
 
     await waitForHealthy(`${indexerURL}/health`)
 
     engineService = spawnService(
-      'resolution-engine',
-      path.resolve(REPO_ROOT, 'resolution-engine'),
+      'question-market-blueprint-engine',
+      BLUEPRINT_ENGINE_ROOT,
       prefixedEnv({
         ALGOD_SERVER,
         ALGOD_PORT: String(ALGOD_PORT),
         ALGOD_TOKEN,
         INDEXER_URL: indexerURL,
-        TRACE_INGEST_TOKEN: INDEXER_WRITE_TOKEN,
-        POLL_INTERVAL: '1000',
+        LISTEN_PORT: String(enginePort),
+        INDEXER_WRITE_TOKEN,
+        ENGINE_CONTROL_TOKEN,
+        ENGINE_CALLBACK_TOKEN,
         RESOLUTION_DATA_DIR: engineDataDir,
-        RESOLUTION_AUTHORITY_PRIVATE_KEY: Buffer.from(creator.sk).toString('base64'),
       }),
     )
 
@@ -750,7 +815,7 @@ describeResolutionEngine('E2E: resolution engine smoke on localnet', () => {
     expect(resolvedState.winningOutcome).toBe(0)
   }, 180_000)
 
-  it('automates defer_resolution for challenged early proposals', async () => {
+  it('automates deferred results for challenged early proposals', async () => {
     const marketAppId = await createSmokeMarket('Will challenged early proposal reopen?', {
       deadlineOffsetSecs: 600,
       challengeWindowSecs: 30,

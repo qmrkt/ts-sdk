@@ -10,23 +10,27 @@ function baseBlueprint(prompt: string): ResolutionBlueprint {
     nodes: [
       {
         id: 'judge',
-        type: 'llm_judge',
+        type: 'llm_call',
         config: {
           provider: 'anthropic',
           model: 'claude-sonnet-4-6',
           prompt,
+          allowed_outcomes_key: 'inputs.market.outcomes_json',
           timeout_seconds: 60,
         },
       },
       {
-        id: 'submit',
-        type: 'submit_result',
+        id: 'success',
+        type: 'return',
         config: {
-          outcome_key: 'judge.outcome',
+          value: {
+            status: 'success',
+            outcome: '{{results.judge.outcome}}',
+          },
         },
       },
     ],
-    edges: [{ from: 'judge', to: 'submit' }],
+    edges: [{ from: 'judge', to: 'success' }],
   }
 }
 
@@ -40,6 +44,7 @@ describe('compileResolutionBlueprint', () => {
 
     expect(compiled.bytes.length).toBeGreaterThan(0)
     expect(compiled.blueprint.nodes[0]?.position).toBeUndefined()
+    expect((compiled.blueprint.nodes[0]?.config as { prompt?: string }).prompt).toContain('Did it happen?')
   })
 
   it('enforces the 8KB limit by UTF-8 byte length', () => {

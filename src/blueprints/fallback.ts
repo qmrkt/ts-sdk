@@ -62,18 +62,11 @@ function inferPresetId(
 ): ResolutionBlueprintPresetId {
   const normalized = ` ${summary.toLowerCase()} `
 
-  const mentionsParticipantEvidence =
-    normalized.includes('participant evidence') ||
-    normalized.includes('evidence window') ||
-    normalized.includes('signed participant') ||
-    normalized.includes('submission count') ||
-    normalized.includes('claimed outcome')
-
   const mentionsWait =
     normalized.includes(' wait ') ||
     normalized.includes(' delay ') ||
-    normalized.includes('window') ||
-    normalized.includes('grace period')
+    normalized.includes('grace period') ||
+    normalized.includes('window')
 
   const mentionsLlm =
     normalized.includes(' llm ') ||
@@ -81,6 +74,12 @@ function inferPresetId(
     normalized.includes(' ai ') ||
     normalized.includes('claude') ||
     normalized.includes('gpt')
+
+  const mentionsAgent =
+    normalized.includes('agent') ||
+    normalized.includes('tool') ||
+    normalized.includes('investigate') ||
+    normalized.includes('research')
 
   const mentionsFallback =
     normalized.includes('fallback') ||
@@ -91,31 +90,39 @@ function inferPresetId(
     normalized.includes('api') ||
     normalized.includes('endpoint') ||
     normalized.includes('external data') ||
-    normalized.includes('technical check') ||
     normalized.includes('automatically') ||
+    normalized.includes('technical check') ||
     normalized.includes('without needing manual') ||
     normalized.includes('continuously') ||
     normalized.includes('detect')
+
+  const mentionsDynamicBlueprint =
+    normalized.includes('dynamic blueprint') ||
+    normalized.includes('child blueprint') ||
+    normalized.includes('gadget') ||
+    normalized.includes('validate blueprint')
 
   const mentionsHuman =
     normalized.includes('human') ||
     normalized.includes('manual') ||
     normalized.includes('creator') ||
     normalized.includes('protocol admin') ||
-    normalized.includes('trusted resolver')
+    normalized.includes('trusted resolver') ||
+    normalized.includes('signal')
 
-  if (mentionsParticipantEvidence) return 'participant_evidence_llm'
+  if (mentionsDynamicBlueprint) return 'validate_blueprint_gadget'
   if (mentionsApi && mentionsWait) return 'api_fetch_wait'
-  if (mentionsApi && (mentionsLlm || mentionsFallback)) return 'api_fetch_llm'
-  if (mentionsLlm) return 'llm_judge'
+  if (mentionsApi && (mentionsAgent || mentionsLlm || mentionsFallback)) return 'api_fetch_agent_loop'
+  if (mentionsAgent) return 'agent_loop'
+  if (mentionsLlm) return 'llm_call'
   if (mentionsApi) return 'api_fetch'
-  if (mentionsHuman) return 'human_judge'
+  if (mentionsHuman) return 'await_signal'
   if (
     resolutionAuthority &&
     (resolutionAuthority === creator || resolutionAuthority === marketAdmin)
   ) {
-    return 'human_judge'
+    return 'await_signal'
   }
 
-  return 'human_judge'
+  return 'await_signal'
 }
