@@ -138,4 +138,30 @@ describe('IndexerClient', () => {
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit | undefined]
     expect(init?.headers).toMatchObject({ Authorization: 'Basic dXNlcjpwYXNz' })
   })
+
+  it('uploads an image via POST /images/upload', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ cid: 'Qmabc', local_only: false, size: 4096 }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new IndexerClient({ baseUrl: 'https://indexer.example', auth: 'user:pass' })
+    const result = await client.uploadImage('https://images.example/x.jpg')
+
+    expect(result).toEqual({ cid: 'Qmabc', localOnly: false, size: 4096 })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit | undefined]
+    expect(url).toBe('https://indexer.example/images/upload')
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toMatchObject({ Authorization: 'Basic dXNlcjpwYXNz', 'Content-Type': 'application/json' })
+    expect(init?.body).toBe(JSON.stringify({ url: 'https://images.example/x.jpg' }))
+  })
+
+  it('rejects non-http URLs in uploadImage', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new IndexerClient({ baseUrl: 'https://indexer.example' })
+    await expect(client.uploadImage('ftp://bad/x.jpg')).rejects.toThrow('uploadImage: url must be http(s)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

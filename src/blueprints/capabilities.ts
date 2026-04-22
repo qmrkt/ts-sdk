@@ -57,11 +57,17 @@ const defaultAgentLoopConfig = (): AgentLoopConfig => ({
   provider: 'anthropic',
   model: 'claude-sonnet-4-6',
   system_prompt:
-    'You are resolving a prediction market. Use tools when helpful, then record the best supported answer.',
+    'You are resolving a prediction market. Choose the best investigation strategy given the market question, outcomes, deadline, and available tools. Gather the strongest public evidence you can find, prefer primary and recent sources when timing matters, and only return an outcome when the evidence supports it. If the evidence is insufficient, contradictory, or unverifiable, return inconclusive instead of guessing.',
   prompt:
     'Question: {{market.question}}\n' +
-    'Outcomes: {{market.outcomes.indexed}}\n\n' +
-    'Investigate the question, use tools if needed, then return the correct outcome index.',
+    'Outcomes: {{market.outcomes.indexed}}\n' +
+    'Resolution deadline: {{market.deadline.iso}}\n\n' +
+    'Investigate this market using the best strategy you can devise. Use tools to gather evidence from public sources, follow the strongest leads, compare competing claims, and decide which outcome is best supported.\n\n' +
+    'Return a structured resolution with:\n' +
+    '- outcome: the winning outcome index\n' +
+    '- reasoning: a concise evidence-based explanation\n' +
+    '- confidence: a 0-1 confidence estimate\n\n' +
+    'If the market cannot be resolved confidently from available evidence, return inconclusive.',
   timeout_seconds: 300,
   tool_timeout_seconds: 20,
   max_steps: 8,

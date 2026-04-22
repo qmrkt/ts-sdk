@@ -1,8 +1,8 @@
 {
-  "network": "localnet",
-  "deployer": "ABC47FIGVHGEWWMA7I7ATAOS5PR56IUBVVSLDNPGZJTSV762EKRNV5M72U",
-  "protocolConfigAppId": 1002,
-  "marketFactoryAppId": 1003,
-  "usdcAsaId": 1001,
-  "deployedAt": "2026-04-19T16:16:46.166Z"
+  "network": "testnet",
+  "deployer": "767KVG7URDMGS7TVGFT7FVLWMA5ZPS5EHHKI3SCNLCH6Z6H7EI7KYWFOXU",
+  "protocolConfigAppId": 759184113,
+  "marketFactoryAppId": 759184121,
+  "usdcAsaId": 759184112,
+  "deployedAt": "2026-04-21T22:30:09.135Z"
 }

@@ -15,6 +15,7 @@ export type ResolutionBlueprintPresetId =
   | 'api_fetch'
   | 'llm_call'
   | 'agent_loop'
+  | 'yolo_resolution'
   | 'api_fetch_wait'
   | 'api_fetch_agent_loop'
   | 'validate_blueprint_gadget'

@@ -21,9 +21,26 @@ export type IndexerUserPositionsResponse = IndexerUserPosition[]
 export type IndexerUserLpResponse = NormalizedIndexerLpStake[]
 export type IndexerUserTrade = Record<string, unknown>
 export type IndexerUserTradesResponse = IndexerUserTrade[]
-export type IndexerLeaderboardEntry = Record<string, unknown>
+export interface IndexerLeaderboardEntry {
+  address: string
+  realizedPnl?: number
+  totalPnl?: number
+  marketsTraded: number
+  totalBought?: number
+  totalSold?: number
+  totalClaimed?: number
+  realizedCostBasis?: number
+  realizedVolume?: number
+  tradeCount?: number
+}
 export type IndexerLeaderboardResponse = IndexerLeaderboardEntry[]
 export type IndexerHealthResponse = Record<string, unknown>
+
+export interface IndexerImageUploadResponse {
+  cid: string
+  localOnly: boolean
+  size: number
+}
 
 const DEFAULT_TIMEOUT_MS = 10_000
 const MAX_LIMIT = 1_000
@@ -114,6 +131,41 @@ export class IndexerClient {
     }
   }
 
+  private async post<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
+    const url = `${this.baseUrl}${path}`
+    const controller = new AbortController()
+    const effectiveTimeout = timeoutMs ?? this.timeoutMs
+    const timeout = setTimeout(() => controller.abort(`Indexer request timed out after ${effectiveTimeout}ms`), effectiveTimeout)
+
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+        signal: controller.signal,
+      })
+
+      if (!resp.ok) {
+        const responseText = (await resp.text()).trim()
+        const responseDetail = responseText.length > 0 ? ` - ${responseText}` : ''
+        throw new Error(`Indexer POST ${url} failed: ${resp.status} ${resp.statusText}${responseDetail}`)
+      }
+
+      if (resp.status === 204) {
+        return undefined as T
+      }
+
+      return await resp.json() as T
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Indexer POST ${url} timed out after ${effectiveTimeout}ms`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
   async listMarkets(opts?: { status?: number }): Promise<IndexerMarketsResponse> {
     if (opts?.status !== undefined) {
       assertNonNegativeInteger(opts.status, 'status')
@@ -167,5 +219,22 @@ export class IndexerClient {
 
   async health(): Promise<IndexerHealthResponse> {
     return this.get<IndexerHealthResponse>('/health')
+  }
+
+  async uploadImage(url: string): Promise<IndexerImageUploadResponse> {
+    const trimmed = url.trim()
+    if (!/^https?:\/\//i.test(trimmed)) {
+      throw new Error('uploadImage: url must be http(s)')
+    }
+    const raw = await this.post<{ cid?: string; local_only?: boolean; size?: number }>(
+      '/images/upload',
+      { url: trimmed },
+      30_000,
+    )
+    return {
+      cid: raw.cid ?? '',
+      localOnly: raw.local_only ?? true,
+      size: raw.size ?? 0,
+    }
   }
 }

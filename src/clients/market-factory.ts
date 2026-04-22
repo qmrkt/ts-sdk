@@ -7,17 +7,25 @@ import { readConfig, type ProtocolConfig } from './protocol-config.js'
 import { marketFactorySpec as spec } from './contract-specs.js'
 
 const methods = loadMethods(spec)
-const FACTORY_CREATE_MBR = 5_000_000n
+export const FACTORY_CREATE_MBR = 5_000_000n
 const ATOMIC_MARKET_MBR_FLOOR = 2_500_000n
 const RETRY_LIMIT = 8
 const MIN_OUTCOMES = 2
 export const MAX_ACTIVE_LP_OUTCOMES = 8
 export const DEFAULT_LP_ENTRY_MAX_PRICE_FP_BIGINT = BigInt(DEFAULT_LP_ENTRY_MAX_PRICE_FP_NUMBER)
 export const DEFAULT_LP_ENTRY_MAX_PRICE_FP = DEFAULT_LP_ENTRY_MAX_PRICE_FP_BIGINT
-const ACCOUNT_BASE_MBR = 100_000n
-const ASA_HOLDING_MBR = 100_000n
+export const ACCOUNT_BASE_MBR = 100_000n
+export const ASA_HOLDING_MBR = 100_000n
 const BOX_FLAT_MBR = 2_500n
 const BOX_BYTE_MBR = 400n
+// Per-slot MBR contributions for the new market account.
+export const APP_PAGE_MBR = 100_000n
+export const APP_GLOBAL_UINT_MBR = 28_500n
+export const APP_GLOBAL_BYTES_MBR = 50_000n
+// Must match the numbers compiled into the factory's market_create inner-txn.
+export const QUESTION_MARKET_EXTRA_PAGES = 3n
+export const QUESTION_MARKET_GLOBAL_UINTS = 48n
+export const QUESTION_MARKET_GLOBAL_BYTES = 15n
 export class AtomicCreateUnsupportedError extends Error {
   constructor(message: string) {
     super(message)
@@ -136,9 +144,26 @@ function boxMbr(name: Uint8Array, size: number): bigint {
 export function estimateAtomicMarketMbrFunding(
   _params: Pick<CreateMarketAtomicParams, 'numOutcomes'>,
 ): bigint {
-  // No boxes at creation -- all state is in GlobalState.
-  // MBR covers: account base + ASA holding + global state slots.
-  return ACCOUNT_BASE_MBR + ASA_HOLDING_MBR + 500_000n
+  // Actual MBR cost on the new market app's account:
+  //   base + ASA opt-in + extra program pages + global state slots.
+  // All values sourced from the Algorand MBR rules in effect since round ~30M.
+  return (
+    ACCOUNT_BASE_MBR +
+    ASA_HOLDING_MBR +
+    QUESTION_MARKET_EXTRA_PAGES * APP_PAGE_MBR +
+    QUESTION_MARKET_GLOBAL_UINTS * APP_GLOBAL_UINT_MBR +
+    QUESTION_MARKET_GLOBAL_BYTES * APP_GLOBAL_BYTES_MBR
+  )
+}
+
+/**
+ * Total ALGO the creator wallet must forward to the factory in txn 1 of the
+ * atomic create group. Matches the sum used inside `createMarketAtomic`.
+ */
+export function estimateAtomicCreatorAlgoFunding(
+  params: Pick<CreateMarketAtomicParams, 'numOutcomes'>,
+): bigint {
+  return estimateAtomicMarketMbrFunding(params) + FACTORY_CREATE_MBR
 }
 
 function validateAtomicOutcomeCount(numOutcomes: number): void {
@@ -257,8 +282,10 @@ export async function createMarketAtomic(
   //   4. Forwards USDC to market + calls bootstrap
   // Returns the created app ID. No prediction needed.
 
-  // MBR: account base + ASA + 63 global state slots + extra pages + margin
-  const mbrFunding = params.marketMbrFunding ?? BigInt(10_000_000)
+  // MBR: account base + ASA + global state slots + extra pages.
+  // Default matches the exact cost published by estimateAtomicMarketMbrFunding
+  // so the UI's displayed ALGO total equals what gets sent on-chain.
+  const mbrFunding = params.marketMbrFunding ?? estimateAtomicMarketMbrFunding(params)
   const totalAlgoFunding = mbrFunding + FACTORY_CREATE_MBR
 
   const sp = await config.algodClient.getTransactionParams().do()

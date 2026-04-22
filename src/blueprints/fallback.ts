@@ -81,6 +81,12 @@ function inferPresetId(
     normalized.includes('investigate') ||
     normalized.includes('research')
 
+  const mentionsYolo =
+    normalized.includes(' yolo ') ||
+    normalized.includes('search the web') ||
+    normalized.includes('web search') ||
+    normalized.includes('best strategy')
+
   const mentionsFallback =
     normalized.includes('fallback') ||
     normalized.includes('escalat') ||
@@ -113,6 +119,7 @@ function inferPresetId(
   if (mentionsDynamicBlueprint) return 'validate_blueprint_gadget'
   if (mentionsApi && mentionsWait) return 'api_fetch_wait'
   if (mentionsApi && (mentionsAgent || mentionsLlm || mentionsFallback)) return 'api_fetch_agent_loop'
+  if (mentionsYolo) return 'yolo_resolution'
   if (mentionsAgent) return 'agent_loop'
   if (mentionsLlm) return 'llm_call'
   if (mentionsApi) return 'api_fetch'

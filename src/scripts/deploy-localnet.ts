@@ -381,7 +381,7 @@ async function main(): Promise<void> {
       BigInt(100_000_000),
       BigInt(20),
       BigInt(10_000),
-      BigInt(50_000_000),
+      BigInt(10_000_000),  // default_b (10 USDC)
       BigInt(500),
       BigInt(50),
       deployer,

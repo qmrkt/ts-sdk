@@ -2,6 +2,7 @@ export {
   IndexerClient,
   type IndexerClientConfig,
   type IndexerHealthResponse,
+  type IndexerImageUploadResponse,
   type IndexerLeaderboardEntry,
   type IndexerLeaderboardResponse,
   type IndexerMarketPosition,

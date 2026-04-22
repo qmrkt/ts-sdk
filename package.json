@@ -1,6 +1,6 @@
 {
   "name": "@questionmarket/sdk",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "TypeScript SDK for question.market prediction market contracts on Algorand",
   "type": "module",
   "main": "dist/index.js",
@@ -17,10 +17,6 @@
     "./blueprints": {
       "types": "./dist/blueprints/index.d.ts",
       "default": "./dist/blueprints/index.js"
-    },
-    "./ipfs": {
-      "types": "./dist/ipfs/index.d.ts",
-      "default": "./dist/ipfs/index.js"
     },
     "./indexer": {
       "types": "./dist/indexer/index.d.ts",
@@ -45,8 +41,7 @@
     "prepublishOnly": "npm test"
   },
   "dependencies": {
-    "algosdk": "^3.5.2",
-    "pinata": "^1.0.0"
+    "algosdk": "^3.5.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",
